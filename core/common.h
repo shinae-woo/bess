@@ -4,8 +4,13 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <assert.h>
 
+#ifdef __cplusplus
+#define ct_assert(p)	static_assert(p, "Compile-time assertion failure")
+#else
 #define ct_assert(p)	_Static_assert(p, "Compile-time assertion failure")
+#endif
 
 /* XXX: add queue.h? */
 typedef uint8_t queue_t;

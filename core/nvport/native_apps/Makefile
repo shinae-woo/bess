@@ -28,11 +28,11 @@ SN_LIB_PATH = $(abspath ../)
 
 SN_LIBS = -L../ -lsn -Wl,-rpath $(SN_LIB_PATH)
 
-CC = gcc
-CFLAGS = -std=gnu99 -Wall -Werror -march=native -Wno-unused-function \
+CC = g++
+CFLAGS = -std=c++11 -Wall -march=native -Wno-unused-function \
 	 -Wno-unused-but-set-variable -I../sndrv -I../ -fPIC -g3 -O3 
 
-all: sample sink source fastforward sourcesink alloc_test iso_test 
+all: sample sink source fastforward sourcesink #alloc_test iso_test 
 clean:
 	rm -f *.o *.a *.so sample sink source fastforward sourcesink iso_test alloc_test
 
@@ -48,13 +48,13 @@ sourcesink.o: sourcesink.c
 sourcesink: sourcesink.o 
 	$(CC) $< -o $@ -L. -Wl,--whole-archive $(SN_LIBS) -Wl,--no-whole-archive $(LIBS)
 
-sink.o: sink.c 
+sink.o: sink.c
 	$(CC) $(CFLAGS) -c $< -o $@ -I$(DPDK_INC_DIR)
 
 sink: sink.o 
 	$(CC) $< -o $@ -L. -Wl,--whole-archive $(SN_LIBS) -Wl,--no-whole-archive $(LIBS)
 
-source.o: source.c 
+source.o: source.c
 	$(CC) $(CFLAGS) -c $< -o $@ -I$(DPDK_INC_DIR)
 
 source: source.o 
@@ -66,13 +66,13 @@ fastforward.o: fastforward.c
 fastforward: fastforward.o 
 	$(CC) $< -o $@ -L. -Wl,--whole-archive $(SN_LIBS) -Wl,--no-whole-archive $(LIBS)
 
-alloc_test.o: alloc_test.c 
+alloc_test.o: alloc_test.c
 	$(CC) $(CFLAGS) -c $< -o $@ -I$(DPDK_INC_DIR)
 
 alloc_test: alloc_test.o 
 	$(CC) $< -o $@ -L. -Wl,--whole-archive $(SN_LIBS) -Wl,--no-whole-archive $(LIBS)
 
-iso_test.o: iso_test.c 
+iso_test.o: iso_test.c
 	$(CC) $(CFLAGS) -c $< -o $@ -I$(DPDK_INC_DIR)
 
 iso_test: iso_test.o 

@@ -82,7 +82,7 @@ static void refill_tx_bufs(struct llring *r)
 		return;
 
 	for (int i = 0; i < ret; i++)
-		objs[i] = (void *)pkts[i]->immutable.paddr;
+		objs[i] = (void *)pkts[i]->immutable.immutable.paddr;
 	
 	ret = llring_mp_enqueue_bulk(r, objs, ret);
 	assert(ret == 0);

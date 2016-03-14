@@ -1,6 +1,10 @@
 #ifndef __SN_H__
 #define __SN_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 
 #include <rte_config.h>
@@ -220,5 +224,9 @@ static inline void __sn_snb_alloc_bulk(snb_array_t snbs, int cnt)
 #endif
 	}
 }
+
+#ifdef __cplusplus
+} //close extern "C"
+#endif
 
 #endif

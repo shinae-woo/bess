@@ -21,7 +21,7 @@
  *	master		RTE_MAX_LCORE-1		all other cores
  */
 
-typedef volatile enum {
+typedef enum {
 	WORKER_PAUSING = 0,	/* transient state for blocking or quitting */
 	WORKER_PAUSED,
 	WORKER_RUNNING,

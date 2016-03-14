@@ -53,7 +53,7 @@ struct snbuf {
 			union {
 				char _immutable[SNBUF_IMMUTABLE];
 
-				const struct snbuf_immutable {
+				struct snbuf_immutable {
 					/* must be the first field */
 					struct snbuf *vaddr;
 
@@ -65,7 +65,7 @@ struct snbuf {
 					/* packet index within the pool */
 					uint32_t index;
 				} immutable;
-			};
+			} immutable;
 
 			union {
 				char _metadata[SNBUF_METADATA];
@@ -94,7 +94,8 @@ struct snbuf {
 	char _data[SNBUF_DATA];
 };
 
-typedef struct snbuf * restrict * restrict snb_array_t;
+//typedef struct snbuf * restrict * restrict snb_array_t;
+typedef struct snbuf * * snb_array_t;
 
 static inline char *snb_head_data(struct snbuf *snb)
 {
@@ -274,7 +275,7 @@ struct rte_mempool *get_pframe_pool_socket(int socket);
 
 static inline phys_addr_t snb_to_paddr(struct snbuf *snb)
 {
-	return snb->immutable.paddr;
+	return snb->immutable.immutable.paddr;
 }
 
 /* Slow. Do not use in the datapath */

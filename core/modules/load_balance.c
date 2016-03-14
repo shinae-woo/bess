@@ -16,6 +16,10 @@
  */
 struct lb_priv {
 	gate_t gates[MAX_OUTPUT_GATES];
+	struct {
+		uint16_t offset;
+		uint32_t mask;
+	} rule;
 	uint32_t ngates;
 };
 
@@ -54,6 +58,29 @@ static struct snobj *lb_init(struct module *m, struct snobj *arg)
 	} else {
 		return snobj_err(EINVAL, "Must specify gates to load balancer");
 	}
+
+	if (snobj_eval_exists(arg, "rule") &&
+			snobj_eval(arg, "rule")->type == TYPE_MAP) {
+		struct snobj *rule = snobj_eval(arg, "rule");
+
+		priv->rule.offset = snobj_eval_int(rule, "offset");
+		switch(snobj_eval_int(rule, "size")) {
+		case 1:
+			priv->rule.mask = 0x000000ff;
+			break;
+		case 2:
+			priv->rule.mask = 0x0000ffff;
+			break;
+		case 4:
+			priv->rule.mask = 0xffffffff;
+			break;
+		default:
+			return snobj_err(EINVAL, "'size' must be 1, 2, or 4");
+		}
+
+	} else {
+		return snobj_err(EINVAL, "Must specify rules to load balancer");
+	}
 	return NULL;
 	
 }
@@ -89,45 +116,21 @@ static struct snobj *lb_query(struct module *m, struct snobj *arg)
 	return NULL;	
 }
 
-static inline int load_balance_flow(uint32_t ngates, 
-		uint32_t src_ip, uint32_t dst_ip,
-		uint16_t src_port, uint16_t dst_port)
+static inline int load_balance_pkt(uint32_t ngates, 
+		uint32_t offset, uint32_t mask, struct snbuf *snb) 
 {
-	static uint32_t count = 0;
-	static  FILE *fp;
-	fp = fopen("log","a");
-	
-	if (count ++ < 100)
-		fprintf(fp, "%0x -> %d\n", src_ip, src_ip % ngates);
-
-	fclose(fp);
-	return src_ip % ngates;
-}
-
-static inline int load_balance_pkt(uint32_t ngates, struct rte_mbuf *mbuf) 
-{
-	struct ether_hdr *ethh = rte_pktmbuf_mtod(mbuf, struct ether_hdr *);
-
-	if (ethh->ether_type != rte_be_to_cpu_16(ETHER_TYPE_IPv4)) 
-		return -1;
-	
-	struct ipv4_hdr* iph = (struct ipv4_hdr *)rte_pktmbuf_adj(mbuf, 
-			sizeof(struct ether_hdr));
-
-	if (iph->next_proto_id == IPPROTO_UDP) {
-		struct udp_hdr* udph = (struct udp_hdr *) ((u_char *)iph +
-				((iph->version_ihl & IPV4_HDR_IHL_MASK) << 2));
-		return load_balance_flow(ngates, iph->src_addr, iph->dst_addr, 
-				udph->src_port, udph->dst_port);
-
-	} else if (iph->next_proto_id == IPPROTO_TCP) {
-		struct tcp_hdr* tcph = (struct tcp_hdr *) ((u_char *)iph +
-				((iph->version_ihl & IPV4_HDR_IHL_MASK) << 2));
-		return load_balance_flow(ngates, iph->src_addr, iph->dst_addr, 
-				tcph->src_port, tcph->dst_port);
-	}
-	
-	return -1;
+	char *head = snb_head_data(snb);
+	uint32_t p = *(uint32_t *)(head + offset);
+	uint32_t range_per_gate = mask/ngates;
+#if 0
+	FILE *file = fopen("/home/shinae/log", "a");
+	fprintf(file, "%08x %02x %02x %02x %02x %08x %08x %d\n", mask, 
+			*(head+offset), *(head+offset+1), 
+			*(head+offset+2), *(head+offset+3), 
+			p, p & mask, (p & mask) / range_per_gate);
+	fclose(file);
+#endif
+	return (p & mask) / range_per_gate;
 }
 
 static void
@@ -137,8 +140,8 @@ lb_process_batch(struct module *m, struct pkt_batch *batch)
 	gate_t ogates[MAX_PKT_BURST];
 
 	for (int i = 0; i < batch->cnt; i++) {
-		int gate_id = load_balance_pkt(priv->ngates, 
-				(struct rte_mbuf *) batch->pkts[i]);
+		int gate_id = load_balance_pkt(priv->ngates, priv->rule.offset, 
+				priv->rule.mask, batch->pkts[i]);
 		if (gate_id < 0 || gate_id > priv->ngates)
 			ogates[i] = priv->gates[priv->ngates];
 		else

@@ -780,11 +780,19 @@ def _draw_pipeline(cli, field, last_stats = None):
 
             for gate in gates:
                 if last_stats is not None:
-                    last_time, last_val = last_stats[(name, gate['gate'])]
-                    new_time, new_val = gate['timestamp'], gate[field]
-                    last_stats[(name, gate['gate'])] = (new_time, new_val)
+                    try:
+                        last_time, last_val = last_stats[(name, gate['gate'])]
+                        new_time, new_val = gate['timestamp'], gate[field]
+                        last_stats[(name, gate['gate'])] = (new_time, new_val)
 
-                    val = int((new_val - last_val) / (new_time - last_time))
+                        val = int((new_val - last_val) / (new_time - last_time))
+                    except KeyError: # graph may update
+                        last_stats[(name, gate['gate'])] = \
+                                (gate['timestamp'], gate[field])
+                        new_time, new_val = gate['timestamp'], gate[field]
+                        last_stats[(name, gate['gate'])] = (new_time, new_val)
+                        
+                        val = gate[field]
                 else:
                     val = gate[field]
 

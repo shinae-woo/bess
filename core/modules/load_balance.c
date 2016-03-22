@@ -12,7 +12,6 @@
 
 /* ngates: number of lb clients 
  * gates[0] ~ ngates[ngates-1]: ports for lb clients
- * gates[n]: default port for packets not be load-balanced
  */
 struct lb_priv {
 	gate_t gates[MAX_OUTPUT_GATES];
@@ -32,7 +31,7 @@ static struct snobj *lb_init(struct module *m, struct snobj *arg)
 	if (snobj_eval_exists(arg, "gates") &&
 	      snobj_eval(arg, "gates")->type == TYPE_INT) {
 		int gate = snobj_eval_int(arg, "gates");
-		if (gate >= MAX_OUTPUT_GATES)
+		if (gate > MAX_OUTPUT_GATES)
 			return snobj_err(EINVAL, "No more than %d gates", 
 					MAX_OUTPUT_GATES-1);
 		priv->ngates = gate;
@@ -89,20 +88,24 @@ static struct snobj *lb_query(struct module *m, struct snobj *arg)
 {
 	struct lb_priv* priv = get_priv(m);
 
-	if (snobj_eval_exists(arg, "gates")) {
+	if (snobj_eval_exists(arg, "gates") &&
+			snobj_eval(arg, "gates")->type == TYPE_INT) {
 		int gate = snobj_eval_int(arg, "gates");
-		if (gate > MAX_OUTPUT_GATES)
+		if (gate >= MAX_OUTPUT_GATES)
 			return snobj_err(EINVAL, "No more than %d gates", 
 					MAX_OUTPUT_GATES);
 		priv->ngates = gate;
 		for (int i = 0; i < gate; i++) {
 			priv->gates[i] = i;
 		}
-	} else if (snobj_eval_exists(arg, "gate_list")) {
-		struct snobj *gates = snobj_eval(arg, "gate_list");
+	} else if (snobj_eval_exists(arg, "gates") &&
+			snobj_eval(arg, "gates")->type == TYPE_LIST) {
+		struct snobj *gates = snobj_eval(arg, "gates");
 		if (gates->size > MAX_OUTPUT_GATES)
 			return snobj_err(EINVAL, "No more than %d gates", 
 					MAX_OUTPUT_GATES);
+
+		priv->ngates = gates->size;
 
 		for (int i = 0; i < gates->size; i++) {
 			priv->gates[i] = 
@@ -111,6 +114,8 @@ static struct snobj *lb_query(struct module *m, struct snobj *arg)
 				return snobj_err(EINVAL, "Invalid gate %d",
 						priv->gates[i]);
 		}
+	} else {
+		return snobj_err(EINVAL, "Must specify gates to load balancer");
 	}
 
 	return NULL;	

@@ -321,7 +321,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	init_softnic(1 << core, "sample");
+	init_softnic(core, "sample");
 	init_ports();
 
 	printf("%d ports found\n", num_ports);

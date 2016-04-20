@@ -165,9 +165,10 @@ static inline int load_balance_pkt(uint32_t ngates,
 		uint32_t offset, uint32_t size, struct snbuf *snb) 
 {
 	char *head = snb_head_data(snb);
+
 	uint32_t hash = 0;
 	for (int i = 0; i < size; ++i) {
-		hash += *(head + offset + i);
+		hash += *(uint8_t *)(head + offset + i);
 		hash += (hash << 10);
 		hash ^= (hash << 6);
 	}
@@ -176,7 +177,6 @@ static inline int load_balance_pkt(uint32_t ngates,
 	hash ^= (hash >> 11);
 	hash += (hash << 15);
 
-	// no consistent hashing
 	return hash % ngates;
 }
 
@@ -189,10 +189,7 @@ lb_process_batch(struct module *m, struct pkt_batch *batch)
 	for (int i = 0; i < batch->cnt; i++) {
 		int gate_id = load_balance_pkt(priv->ngates, priv->rule.offset, 
 				priv->rule.size, batch->pkts[i]);
-		if (gate_id < 0 || gate_id > priv->ngates)
-			ogates[i] = priv->gates[priv->ngates];
-		else
-			ogates[i] = priv->gates[gate_id];
+		ogates[i] = priv->gates[gate_id];
 	}
 	run_split(m, ogates, batch);
 }

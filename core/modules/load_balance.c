@@ -15,9 +15,11 @@
  * gates[0] ~ ngates[ngates-1]: ports for lb clients
  */
 
+#define MAX_LB_GATES 100
+
 #define MAX_BUCKETS 100
 struct lb_priv {
-	gate_t gates[MAX_OUTPUT_GATES];
+	gate_idx_t gates[MAX_LB_GATES];
 	struct {
 		uint16_t offset;
 		uint32_t size;
@@ -26,7 +28,7 @@ struct lb_priv {
 
 #ifdef CHASHING
 	uint32_t nbuckets;
-	uint32_t hash_points[MAX_OUTPUT_GATES][MAX_BUCKETS];
+	uint32_t hash_points[MAX_LB_GATES][MAX_BUCKETS];
 #endif
 };
 
@@ -51,54 +53,57 @@ static uint32_t _hash(int a, int b)
 }
 #endif
 
-static struct snobj *lb_init(struct module *m, struct snobj *arg)
-{	
+static struct snobj *
+command_set_rule(struct module *m, const char *cmd, struct snobj *arg)
+{
 	struct lb_priv* priv = get_priv(m);
-	if (!arg)
-		return snobj_err(EINVAL, "Must specify arguments");
+	
+	if (snobj_type(arg) != TYPE_MAP) 
+		return snobj_err(EINVAL, "Argument must be a map");
 
-	if (snobj_eval_exists(arg, "gates") &&
-	      snobj_eval(arg, "gates")->type == TYPE_INT) {
-		int gate = snobj_eval_int(arg, "gates");
-		if (gate > MAX_OUTPUT_GATES || gate < 0)
-			return snobj_err(EINVAL, "No more than %d gates or "
-					"no less than 0 gates", 
-					MAX_OUTPUT_GATES);
-		priv->ngates = gate;
-		for (int i = 0; i < gate; i++) {
-			priv->gates[i] = i;
-		}
-	} else if (snobj_eval_exists(arg, "gates") &&
-		   snobj_eval(arg, "gates")->type == TYPE_LIST) {
-		struct snobj *gates = snobj_eval(arg, "gates");
-		if (gates->size > MAX_OUTPUT_GATES)
+	struct snobj *_offset = snobj_map_get(arg, "offset");
+	struct snobj *_size = snobj_map_get(arg, "size");
+
+	if (!_offset || snobj_type(_offset) != TYPE_INT)
+		return snobj_err(EINVAL, "Rule map must contain offset"
+					"as a integer");
+	
+	if (!_size || snobj_type(_size) != TYPE_INT)
+		return snobj_err(EINVAL, "Rule map must contain size"
+					"as a integer");
+
+	priv->rule.offset = snobj_int_get(_offset);
+	priv->rule.size = snobj_int_get(_size);
+
+	return NULL;
+}
+
+static struct snobj *
+command_set_num_gates(struct module *m, const char *cmd, struct snobj *arg)
+{
+	struct lb_priv* priv = get_priv(m);
+	
+	if (snobj_type(arg) == TYPE_INT) {
+		int gates = snobj_int_get(arg);
+
+		if (gates < 0 || gates > MAX_LB_GATES || gates > MAX_GATES)
 			return snobj_err(EINVAL, "No more than %d gates", 
-					MAX_OUTPUT_GATES);
+					MIN(MAX_LB_GATES, MAX_GATES));
 
-		priv->ngates = gates->size;
+		priv->ngates = gates;
+		for (int i = 0; i < gates; i++)
+			priv->gates[i] = i;
 
-		for (int i = 0; i < gates->size; i++) {
-			priv->gates[i] = 
-				snobj_int_get(snobj_list_get(gates, i));
-			if (priv->gates[i] > MAX_OUTPUT_GATES)
-				return snobj_err(EINVAL, "Invalid gate %d",
-						priv->gates[i]);
-		}
-	} else {
+	} else
 		return snobj_err(EINVAL, "Must specify gates to load balancer");
-	}
 
-	if (snobj_eval_exists(arg, "rule") &&
-			snobj_eval(arg, "rule")->type == TYPE_MAP) {
-		struct snobj *rule = snobj_eval(arg, "rule");
+	return NULL;	
+}
 
-		priv->rule.offset = snobj_eval_int(rule, "offset");
-		priv->rule.size = snobj_eval_int(rule, "size");
-
-	} else {
-		return snobj_err(EINVAL, "Must specify rules to load balancer");
-	}
-
+/** NOT YET BE TESTED **/
+static struct snobj *
+command_set_chashing(struct module *m, const char *cmd, struct snobj *arg)
+{
 #ifdef CHASHING	
 	int i, j;
 	if (snobj_eval_exists(arg, "buckets") &&
@@ -106,7 +111,7 @@ static struct snobj *lb_init(struct module *m, struct snobj *arg)
 		int nbuckets = snobj_eval_int(arg, "buckets");
 		if (nbuckets > MAX_BUCKETS || nbuckets < 0)
 			return snobj_err(EINVAL, "No more than %d gates or "
-					"no less than 0 gates", MAX_OUTPUT_GATES-1);
+					"no less than 0 gates", MAX_LB_GATES-1);
 		priv->nbuckets = nbuckets;
 	} else {
 		priv->nbuckets = 1;
@@ -118,51 +123,25 @@ static struct snobj *lb_init(struct module *m, struct snobj *arg)
 		}
 	}
 	
-#endif
-
 	return NULL;
+#endif
 	
+	return snobj_err(EINVAL, "Not yet be provided functionality");
 }
 
-static struct snobj *lb_query(struct module *m, struct snobj *arg)
-{
-	struct lb_priv* priv = get_priv(m);
-
-	if (snobj_eval_exists(arg, "gates") &&
-			snobj_eval(arg, "gates")->type == TYPE_INT) {
-		int gate = snobj_eval_int(arg, "gates");
-		if (gate >= MAX_OUTPUT_GATES)
-			return snobj_err(EINVAL, "No more than %d gates", 
-					MAX_OUTPUT_GATES);
-		priv->ngates = gate;
-		for (int i = 0; i < gate; i++) {
-			priv->gates[i] = i;
-		}
-	} else if (snobj_eval_exists(arg, "gates") &&
-			snobj_eval(arg, "gates")->type == TYPE_LIST) {
-		struct snobj *gates = snobj_eval(arg, "gates");
-		if (gates->size > MAX_OUTPUT_GATES)
-			return snobj_err(EINVAL, "No more than %d gates", 
-					MAX_OUTPUT_GATES);
-
-		priv->ngates = gates->size;
-
-		for (int i = 0; i < gates->size; i++) {
-			priv->gates[i] = 
-				snobj_int_get(snobj_list_get(gates, i));
-			if (priv->gates[i] > MAX_OUTPUT_GATES)
-				return snobj_err(EINVAL, "Invalid gate %d",
-						priv->gates[i]);
-		}
-	} else {
-		return snobj_err(EINVAL, "Must specify gates to load balancer");
-	}
-
-	return NULL;	
+static struct snobj *
+lb_init(struct module *m, struct snobj *arg)
+{	
+	if (arg)
+		return command_set_num_gates(m, NULL, arg);
+	else
+		return snobj_err(EINVAL, "Must specify a number of gates "
+				"to split into");
 }
 
-static inline int load_balance_pkt(uint32_t ngates, 
-		uint32_t offset, uint32_t size, struct snbuf *snb) 
+static inline int 
+load_balance_pkt(uint32_t ngates, uint32_t offset, uint32_t size, 
+		struct snbuf *snb) 
 {
 	char *head = snb_head_data(snb);
 
@@ -184,7 +163,7 @@ static void
 lb_process_batch(struct module *m, struct pkt_batch *batch)
 {
 	struct lb_priv* priv = get_priv(m);
-	gate_t ogates[MAX_PKT_BURST];
+	gate_idx_t ogates[MAX_PKT_BURST];
 
 	for (int i = 0; i < batch->cnt; i++) {
 		int gate_id = load_balance_pkt(priv->ngates, priv->rule.offset, 
@@ -196,10 +175,17 @@ lb_process_batch(struct module *m, struct pkt_batch *batch)
 
 static const struct mclass lb = {
 	.name 		= "LoadBalance",
+	.help		= "Load balancing packets by modular hashing",
+	.num_igates	= 1,
+	.num_ogates = MAX_LB_GATES,
 	.priv_size	= sizeof(struct lb_priv),
 	.init 		= lb_init,
 	.process_batch 	= lb_process_batch,
-	.query		= lb_query,
+	.commands =	{
+		{"set_rule", command_set_rule},
+		{"set_num_gates", command_set_num_gates},
+		{"set_chashing", command_set_chashing},
+	}
 };
 
 ADD_MCLASS(lb)

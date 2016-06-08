@@ -122,13 +122,13 @@ void init_bess(uint32_t lcore, char *name)
 	sprintf(opt_core_bitmap, "0x%lx", cpumask);
 	
 	rte_argc = 7;
-	rte_argv[0] = "";
-	rte_argv[1] = "-c";
+	rte_argv[0] = (char *) "";
+	rte_argv[1] = (char *) "-c";
 	rte_argv[2] = opt_core_bitmap;
-	rte_argv[3] = "-n";
-	rte_argv[4] = "4";	/* number of mem channels (Sandy/Ivy Bridge) */
-	rte_argv[5] = "--proc-type";
-	rte_argv[6] = "secondary";
+	rte_argv[3] = (char *) "-n";
+	rte_argv[4] = (char *) "4";	/* number of mem channels (Sandy/Ivy Bridge) */
+	rte_argv[5] = (char *) "--proc-type";
+	rte_argv[6] = (char *) "secondary";
 	rte_argv[7] = NULL;
 
 	/* reset getopt() */
@@ -170,7 +170,7 @@ struct sn_port *init_port(const char *ifname)
 	if (!bar)
 		return NULL;
 
-	port = malloc(sizeof(struct sn_port));
+	port = (sn_port *) malloc(sizeof(struct sn_port));
 	port->bar = bar; 
 
 	port->num_txq = bar->num_inc_q;
@@ -291,6 +291,6 @@ void sn_wait(long cycles) {
 	uint64_t start, end;
 	start = rte_rdtsc();
 	end = start;
-	while (end - start < cycles)
+	while ((long)(end - start) < cycles)
 		end = rte_rdtsc();
 }

@@ -25,8 +25,8 @@ LIBS += -ldl -lpthread -lm
 LIBS += -L$(DPDK_LIB_DIR) -Wl,--whole-archive -l$(DPDK_LIB) \
 	-Wl,--no-whole-archive -lm -lpthread -ldl -lpcap
 
-CC = gcc
-CFLAGS += -std=gnu99 -Wall -Werror -march=native \
+CC = g++
+CFLAGS += -std=c++11 -Wall -Werror -march=native \
 	  -Wno-unused-function -Wno-unused-but-set-variable \
 	  -I../kmod -fPIC -g3 -O3 
 

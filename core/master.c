@@ -14,7 +14,6 @@
 
 #include <rte_config.h>
 #include <rte_lcore.h>
-#include <rte_malloc.h>
 
 #include "log.h"
 #include "worker.h"
@@ -23,7 +22,7 @@
 
 #include "master.h"
 
-/* Port this SoftNIC instance listens on. 
+/* Port this BESS instance listens on. 
  * Panda came up with this default number */
 #define DEFAULT_PORT 	0x02912		/* 10514 in decimal */
 
@@ -105,7 +104,7 @@ static int init_listen_fd(uint16_t port)
 		exit(EXIT_FAILURE);
 	}
 
-	if (listen(listen_fd, 0) < 0) {
+	if (listen(listen_fd, 10) < 0) {
 		log_perr("listen()");
 		exit(EXIT_FAILURE);
 	}
@@ -123,7 +122,7 @@ static struct client *init_client(int fd, struct sockaddr_in c_addr)
 	/* because this is just optimization, we can ignore errors */
 	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &(int){1}, sizeof(int));
 
-	c = rte_zmalloc("client", sizeof(struct client), 0);
+	c = mem_alloc(sizeof(struct client));
 	if (!c) 
 		return NULL;
 
@@ -131,9 +130,9 @@ static struct client *init_client(int fd, struct sockaddr_in c_addr)
 	c->addr = c_addr;
 	c->buf_size = INIT_BUF_SIZE;
 
-	c->buf = rte_zmalloc("client_buf", c->buf_size, 0);
+	c->buf = mem_alloc(c->buf_size);
 	if (!c->buf) {
-		rte_free(c);
+		mem_free(c);
 		return NULL;
 	}
 
@@ -165,15 +164,14 @@ static void close_client(struct client *c)
 		}
 	}
 
-	if (is_holding_pause(c)) {
+	if (is_holding_pause(c))
 		cdlist_del(&c->master_pause_holding);
-	}
 
 	cdlist_del(&c->master_lock_waiting);
 	cdlist_del(&c->master_all);
 
-	rte_free(c->buf);
-	rte_free(c);
+	mem_free(c->buf);
+	mem_free(c);
 }
 
 static struct client *accept_client(int listen_fd)
@@ -261,7 +259,7 @@ static void request_done(struct client *c)
 			goto err;
 		}
 
-		new_buf = rte_realloc(c->buf, c->msg_len, 0);
+		new_buf = mem_realloc(c->buf, c->msg_len);
 		if (!new_buf)
 			goto err;
 
@@ -334,7 +332,7 @@ static void client_recv(struct client *c)
 			return;
 		}
 
-		new_buf = rte_realloc(c->buf, c->msg_len, 0);
+		new_buf = mem_realloc(c->buf, c->msg_len);
 		if (!new_buf) {
 			log_err("Out of memory\n");
 			close_client(c);
@@ -410,8 +408,10 @@ void init_server(uint16_t port)
 
 	master.listen_fd = init_listen_fd(port ? : DEFAULT_PORT);
 
-	ev.events = EPOLLIN;
-	ev.data.fd = master.listen_fd;
+	ev = (struct epoll_event){
+		.events = EPOLLIN,
+		.data.fd = master.listen_fd,
+	};
 
 	ret = epoll_ctl(master.epoll_fd, EPOLL_CTL_ADD, master.listen_fd, &ev);
 	if (ret < 0) {

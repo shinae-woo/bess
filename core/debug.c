@@ -7,6 +7,7 @@
 #include <ucontext.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <sys/syscall.h>
 
 #include <rte_config.h>
 #include <rte_version.h>
@@ -135,8 +136,8 @@ static void print_code(char *symbol, int context)
 	FILE *proc;
 
 	/* Symbol examples:
-	 * ./softnic(run_worker+0x8e) [0x419d0e]" */
-	/* ./softnic() [0x4149d8] */
+	 * ./bessd(run_worker+0x8e) [0x419d0e]" */
+	/* ./bessd() [0x4149d8] */
 	sscanf(symbol, "%[^(](%*s [%[^]]]", executable, addr);
 
 	sprintf(cmd, "addr2line -i -f -p -e %s %s 2> /dev/null", executable, addr);
@@ -166,7 +167,7 @@ static void print_code(char *symbol, int context)
 
 		/* addr2line examples:
 		 * sched_free at /home/sangjin/.../tc.c:277 (discriminator 2)
-		 * run_worker at /home/sangjin/softnic/softnic/module.c:653 */
+		 * run_worker at /home/sangjin/bess/core/module.c:653 */
 
 		line[strlen(line) - 1] = '\0';
 
@@ -257,7 +258,8 @@ static void trap_handler(int sig_num, siginfo_t *info, void *ucontext)
 	#error neither x86 or x86-64
 #endif
 
-	log_crit("A critical error has occured. Aborting...\n");
+	log_crit("A critical error has occured. Aborting... (pid=%d, tid=%d)\n",
+			getpid(), (pid_t)syscall(SYS_gettid));
 	log_crit("Signal: %d (%s), si_code: %d (%s), address: %p, IP: %p\n",
 			sig_num, strsignal(sig_num),
 			info->si_code, si_code_to_str(sig_num, info->si_code),
@@ -335,9 +337,7 @@ __attribute__((constructor(101))) static void set_trap_handler()
 
 void dump_types(void)
 {
-	printf("DPDK %d.%d.%d.%d\n",
-			RTE_VER_MAJOR, RTE_VER_MINOR,
-			RTE_VER_PATCH_LEVEL, RTE_VER_PATCH_RELEASE);
+	printf("DPDK version: %s\n", rte_version());
 
 	printf("sizeof(char)=%zu\n", sizeof(char));
 	printf("sizeof(short)=%zu\n", sizeof(short));
@@ -370,6 +370,7 @@ void dump_types(void)
 	printf("sizeof(task)=%lu\n", sizeof(struct task));
 
 	printf("sizeof(module)=%lu\n", sizeof(struct module));
+	printf("sizeof(gate)=%lu\n", sizeof(struct gate));
 
 	printf("sizeof(worker_context)=%lu\n", sizeof(struct worker_context));
 

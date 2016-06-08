@@ -12,6 +12,7 @@
 #include <sys/file.h>
 #include <sys/resource.h>
 
+#include "opts.h"
 #include "debug.h"
 #include "dpdk.h"
 #include "master.h"
@@ -24,25 +25,34 @@ static struct global_opts *opts = (struct global_opts *)&global_opts;
 
 static void print_usage(char *exec_name)
 {
-	log_err("Usage: %s" \
-		" [-t] [-c <core list>] [-p <port>] [-f] [-k] [-d]\n\n",
+	log_info("Usage: %s" \
+		" [-h] [-t] [-c <core>] [-p <port>] [-m <MB>] [-i pidfile]" \
+		" [-f] [-k] [-s] [-d] [-a]\n\n",
 		exec_name);
 
-	log_err("  %-16s Dump the size of internal data structures\n", 
+	log_info("  %-16s This help message\n", 
+			"-h");
+	log_info("  %-16s Dump the size of internal data structures\n", 
 			"-t");
-	log_err("  %-16s Core ID for each worker (e.g., -c 0,8)\n",
-			"-c <core list>");
-	log_err("  %-16s Specifies the TCP port on which SoftNIC" \
+	log_info("  %-16s Core ID for the default worker thread\n",
+			"-c <core>");
+	log_info("  %-16s Specifies the TCP port on which BESS" \
 			" listens for controller connections\n",
 			"-p <port>");
-	log_err("  %-16s Run BESS in foreground mode (for developers)\n",
+	log_info("  %-16s Specifies how many megabytes to use per socket\n",
+			"-m <MB>");
+	log_info("  %-16s Specifies where to write the pidfile\n",
+			"-i <pidfile>");
+	log_info("  %-16s Run BESS in foreground mode (for developers)\n",
 			"-f");
-	log_err("  %-16s Kill existing BESS instance, if any\n",
+	log_info("  %-16s Kill existing BESS instance, if any\n",
 			"-k");
-	log_err("  %-16s Show TC statistics every second\n",
+	log_info("  %-16s Show TC statistics every second\n",
 			"-s");
-	log_err("  %-16s Run BESS in debug mode (with debug log messages)\n",
+	log_info("  %-16s Run BESS in debug mode (with debug log messages)\n",
 			"-d");
+	log_info("  %-16s Allow multiple instances\n",
+			"-a");
 
 	exit(2);
 }
@@ -55,11 +65,24 @@ static void parse_args(int argc, char **argv)
 
 	num_workers = 0;
 
-	while ((c = getopt(argc, argv, ":tc:p:fksd")) != -1) {
+	while ((c = getopt(argc, argv, ":htc:p:fksdm:i:a")) != -1) {
 		switch (c) {
+		case 'h':
+			print_usage(argv[0]);
+			break;
+
 		case 't':
 			dump_types();
 			exit(EXIT_SUCCESS);
+			break;
+			
+		case 'c':
+			sscanf(optarg, "%d", &opts->default_core);
+			if (!is_cpu_present(opts->default_core)) {
+				log_err("Invalid core ID %d\n", 
+						opts->default_core);
+				print_usage(argv[0]);
+			}
 			break;
 
 		case 'p':
@@ -82,8 +105,25 @@ static void parse_args(int argc, char **argv)
 			opts->debug_mode = 1;
 			break;
 
+		case 'm':
+			if (0 == sscanf(optarg, "%d", &opts->mb_per_socket)) {
+				log_err("Invalid value for -%c\n", optopt);
+				print_usage(argv[0]);
+			}
+			break;
+
+		case 'i':
+			if (opts->pidfile)
+				free(opts->pidfile);
+			opts->pidfile = strdup(optarg); /* Gets leaked */
+			break;
+
+		case 'a':
+			opts->multi_instance = 1;
+			break;
+
 		case ':':
-			log_err("argument is required for -%c\n", optopt);
+			log_err("Argument is required for -%c\n", optopt);
 			print_usage(argv[0]);
 			break;
 
@@ -128,9 +168,14 @@ void check_pidfile()
 
 	pid_t pid;
 
-	fd = open("/var/run/bessd.pid", O_RDWR | O_CREAT, 0644);
+	if (!opts->pidfile)
+		opts->pidfile = "/var/run/bessd.pid";
+	else if (strlen(opts->pidfile) == 0)
+		return;
+
+	fd = open(opts->pidfile, O_RDWR | O_CREAT, 0644);
 	if (fd == -1) {
-		log_perr("open(/var/run/bessd.pid)");
+		log_perr("open(pidfile)");
 		exit(EXIT_FAILURE);
 	}
 
@@ -313,7 +358,7 @@ int main(int argc, char **argv)
 
 	start_logger();
 
-	init_dpdk(argv[0]);
+	init_dpdk(argv[0], opts->mb_per_socket, opts->multi_instance);
 	init_mempool();
 	init_drivers();
 

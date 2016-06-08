@@ -16,9 +16,9 @@ accountname ALL=NOPASSWD: ALL
 
 #### Setting hugepages
 
-BESS runs on top of DPDK, which requires hugepages for memory management. You can find details how to set up hugepages at [DPDK documentation](http://dpdk.org/doc/guides/linux_gsg/sys_reqs.html?highlight=hugepages#use-of-hugepages-in-the-linux-environment). BESS requires at least 2GB of memory reserved as hugepages. If you have NUMA systems, which have two processors or more, each node/processor/socket needs 2GB.
+BESS runs on top of DPDK, which requires hugepages for memory management. You can find details how to set up hugepages at [DPDK documentation](http://dpdk.org/doc/guides/linux_gsg/sys_reqs.html?highlight=hugepages#use-of-hugepages-in-the-linux-environment). By default, BESS requires at least 2GB of memory reserved as hugepages (in NUMA systems, which have two processors or more, that much memory is required for each node/processor/socket).
 
-On recent x86 servers, 2MB and 1GB hugepages are supported. You can use either of them for BESS. For 2MB hugepages (at least 1024 pages are needed), you can simply run:
+On recent x86 servers, 2MB and 1GB hugepages are supported. You can use either of them for BESS. For 2MB hugepages (where at least 1024 pages are needed to reach 2GB), you can simply run:
 
 ```
 (on a single-socket system)
@@ -111,6 +111,17 @@ $ sudo bin/bessd
 ``` 
 
 > NOTE: Only one instance of `bessd` process can run on a host. If there already is a running process, the new process will fail to run.
+
+There are (optional) command options you can specify when running the daemon. You can combine multiple options if necessary.
+
+* `-f`: The daemon runs in foreground mode.
+  * This mode is useful for developers, in that log messages will be shown on the terminal.
+  * BESS terminates once you break the process (`Ctrl+C`).
+* '-d': The daemon runs in debug mode.
+  * DEBUG level syslog messages will not be filtered.
+  * In addition, all communication between a controller and the BESS daemon process will be dumped.
+* '-k': If there already is a running BESS daemon process, kill it before launching a new one. Without this option, the new process will aborts with an error message.
+* '-s': For every second, BESS prints out some statistics for each traffic class.
 
 Alternatively, you can use the `bessctl` CLI interface. The details of `bessctl` can be found [here](bessctl.md). It will kill the old instance, if any.
 

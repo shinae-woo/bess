@@ -1,13 +1,9 @@
-#include <assert.h>
-
-#include <rte_cycles.h>
-#include <rte_malloc.h>
-
-#include "module.h"
+#include "mem_alloc.h"
 #include "dpdk.h"
 #include "time.h"
 #include "tc.h"
 #include "namespace.h"
+#include "module.h"
 
 task_id_t register_task(struct module *m, void *arg)
 {
@@ -18,12 +14,12 @@ task_id_t register_task(struct module *m, void *arg)
 	if (!m->mclass->run_task)
 		return INVALID_TASK_ID;
 
-	for (id = 0; id <= MAX_TASKS_PER_MODULE; id++)
+	for (id = 0; id < MAX_TASKS_PER_MODULE; id++)
 		if (m->tasks[id] == NULL)
 			goto found;
 
 	/* cannot find an empty slot */
-	return INVALID_TASK_ID;		
+	return INVALID_TASK_ID;
 
 found:
 	t = task_create(m, arg);
@@ -35,16 +31,38 @@ found:
 	return id;
 }
 
+task_id_t task_to_tid(struct task *t)
+{
+	struct module *m = t->m;
+
+	for (task_id_t id = 0; id < MAX_TASKS_PER_MODULE; id++)
+		if (m->tasks[id] == t)
+			return id;
+
+	return INVALID_TASK_ID;
+}
+
+int num_module_tasks(struct module *m)
+{
+	int cnt = 0;
+
+	for (task_id_t id = 0; id < MAX_TASKS_PER_MODULE; id++)
+		if (m->tasks[id])
+			cnt++;
+
+	return cnt;
+}
+
 size_t list_modules(const struct module **p_arr, size_t arr_size, size_t offset)
 {
 	int ret = 0;
 	int iter_cnt = 0;
-	
+
 	struct ns_iter iter;
 
 	ns_init_iterator(&iter, NS_TYPE_MODULE);
 	while (1) {
-		struct module *module = (struct module *) ns_next(&iter);	
+		struct module *module = (struct module *) ns_next(&iter);
 		if (!module)
 			break;
 
@@ -53,7 +71,7 @@ size_t list_modules(const struct module **p_arr, size_t arr_size, size_t offset)
 
 		if (ret >= arr_size)
 			break;
-		
+
 		p_arr[ret++] = module;
 	}
 	ns_release_iterator(&iter);
@@ -83,7 +101,7 @@ static void set_default_name(struct module *m)
 		for (t = template; *t != '\0'; t++) {
 			if (t != template && islower(*(t - 1)) && isupper(*t))
 				*s++ = '_';
-			
+
 			*s++ = tolower(*t);
 		}
 
@@ -121,6 +139,7 @@ void deadend(struct module *m, struct pkt_batch *batch)
 	snb_free_bulk(batch->pkts, batch->cnt);
 }
 
+
 static void destroy_all_tasks(struct module *m)
 {
 	for (task_id_t i = 0; i < MAX_TASKS_PER_MODULE; i++) {
@@ -131,16 +150,30 @@ static void destroy_all_tasks(struct module *m)
 	}
 }
 
+static void inherit_attr_list(const struct mclass *mclass, struct module *m)
+{
+	for (int i = 0; i < MAX_ATTRS_PER_MODULE; i++) {
+		const struct mt_attr *attr = &mclass->attrs[i];
+		int ret;
+
+		/* end of the list is marked as a empty-string name */
+		if (strlen(attr->name) == 0)
+			return;
+
+		ret = add_metadata_attr(m, attr->name, attr->size, attr->mode);
+		assert(ret == i);
+	}
+}
+
 /* returns a pointer to the created module.
  * if error, returns NULL and *perr is set */
-struct module *create_module(const char *name, 
-		const struct mclass *mclass, 
+struct module *create_module(const char *name,
+		const struct mclass *mclass,
 		struct snobj *arg,
 		struct snobj **perr)
 {
 	struct module *m = NULL;
 	int ret = 0;
-
 	*perr = NULL;
 
 	if (name && find_module(name)) {
@@ -148,17 +181,14 @@ struct module *create_module(const char *name,
 		goto fail;
 	}
 
-	m = rte_zmalloc("module", sizeof(struct module) + mclass->priv_size, 0);
+	m = mem_alloc(sizeof(struct module) + mclass->priv_size);
 	if (!m) {
 		*perr = snobj_errno(ENOMEM);
 		goto fail;
 	}
 
 	m->mclass = mclass;
-	m->name = rte_zmalloc("name", MODULE_NAME_LEN, 0);
-
-	m->allocated_gates = 0;
-	m->gates = NULL;
+	m->name = mem_alloc(MODULE_NAME_LEN);
 
 	if (!m->name) {
 		*perr = snobj_errno(ENOMEM);
@@ -170,18 +200,7 @@ struct module *create_module(const char *name,
 	else
 		snprintf(m->name, MODULE_NAME_LEN, "%s", name);
 
-#if 0
-	if (ops->timer) {
-		for (i = 0; i < num_workers; i++) {
-			m->timers[i] = rte_zmalloc_socket(NULL, 
-					sizeof(struct rte_timer), 0,
-					wid_to_sid_map[i]);
-			assert(m->timers[i]);
-
-			rte_timer_init(m->timers[i]);
-		}
-	}
-#endif
+	inherit_attr_list(mclass, m);
 
 	if (mclass->init) {
 		*perr = mclass->init(m, arg);
@@ -200,147 +219,208 @@ struct module *create_module(const char *name,
 fail:
 	if (m) {
 		destroy_all_tasks(m);
-		rte_free(m->name);
-		rte_free(m->gates);
+		mem_free(m->name);
 	}
 
-	rte_free(m);
+	mem_free(m);
 
 	return NULL;
 }
 
+static int
+disconnect_modules_upstream(struct module *m_next, gate_idx_t igate_idx);
+
 void destroy_module(struct module *m)
 {
-	struct ns_iter iter;
+	int ret;
 
 	if (m->mclass->deinit)
 		m->mclass->deinit(m);
 
-	/* disconnect from upstream modules. TODO: implement backlink */
-	ns_init_iterator(&iter, NS_TYPE_MODULE);
-	while (1) {
-		struct module *another = (struct module *) ns_next(&iter);
-		if (!another)
-			break;
-		
-		for (gate_t i = 0; i < another->allocated_gates; i++)
-			if (another->gates[i].m == m)
-				disconnect_modules(another, i);
+	/* disconnect from upstream modules. */
+	for (int i = 0; i < m->igates.curr_size; i++) {
+		ret = disconnect_modules_upstream(m, i);
+		assert(ret == 0);
 	}
-	ns_release_iterator(&iter);
 
 	/* disconnect downstream modules */
-	for (gate_t i = 0; i < m->allocated_gates; i++)
-		disconnect_modules(m, i);
+	for (gate_idx_t i = 0; i < m->ogates.curr_size; i++) {
+		ret = disconnect_modules(m, i);
+		assert(ret == 0);
+	}
 
 	destroy_all_tasks(m);
 
-	ns_remove(m->name);
+	ret = ns_remove(m->name);
+	assert(ret == 0);
 
-	rte_free(m->name);
-	rte_free(m->gates);
-	rte_free(m);
+	mem_free(m->name);
+	mem_free(m->ogates.arr);
+	mem_free(m->igates.arr);
+	mem_free(m);
 }
 
 
-static int grow_gates(struct module *m, gate_t gate)
+static int grow_gates(struct module *m, struct gates *gates, gate_idx_t gate)
 {
-	struct output_gate *new_gates;
-	gate_t old_size;
-	gate_t new_size;
+	struct gate **new_arr;
+	gate_idx_t old_size;
+	gate_idx_t new_size;
 
-	if (gate > MAX_OUTPUT_GATES)
-		return -EINVAL;
+	new_size = gates->curr_size ? : 1;
 
-	new_size = m->allocated_gates ? : 1;
-	
-	while (new_size <= gate) {
-		if (new_size)
-			new_size *= 2;
-	}
+	while (new_size <= gate)
+		new_size *= 2;
 
-	new_gates = rte_realloc(m->gates, 
-			sizeof(struct output_gate) * new_size, 0);
-	if (!new_gates)
+	if (new_size > MAX_GATES)
+		new_size = MAX_GATES;
+
+	new_arr = mem_realloc(gates->arr, sizeof(struct gate *) * new_size);
+	if (!new_arr)
 		return -ENOMEM;
 
-	m->gates = new_gates;
+	gates->arr = new_arr;
 
-	old_size = m->allocated_gates;
-	m->allocated_gates = new_size;
+	old_size = gates->curr_size;
+	gates->curr_size = new_size;
 
 	/* initialize the newly created gates */
-	memset(&m->gates[old_size], 0, 
-			sizeof(struct output_gate) * (new_size - old_size));
-
-	for (gate_t i = old_size; i < new_size; i++)
-		disconnect_modules(m, i);
+	memset(&gates->arr[old_size], 0,
+			sizeof(struct gate *) * (new_size - old_size));
 
 	return 0;
 }
 
 /* returns -errno if fails */
-int connect_modules(struct module *m1, gate_t gate, struct module *m2)
+int connect_modules(struct module *m_prev, gate_idx_t ogate_idx,
+		    struct module *m_next, gate_idx_t igate_idx)
 {
-	if (!m2->mclass->process_batch)
+	struct gate *ogate;
+	struct gate *igate;
+
+	if (!m_next->mclass->process_batch)
 		return -EINVAL;
 
-	if (gate >= m1->allocated_gates) {
-		int ret = grow_gates(m1, gate);
+	if (ogate_idx >= m_prev->mclass->num_ogates || ogate_idx >= MAX_GATES)
+		return -EINVAL;
+
+	if (igate_idx >= m_next->mclass->num_igates || igate_idx >= MAX_GATES)
+		return -EINVAL;
+
+	if (ogate_idx >= m_prev->ogates.curr_size) {
+		int ret = grow_gates(m_prev, &m_prev->ogates, ogate_idx);
 		if (ret)
 			return ret;
 	}
 
-	if (m1->gates[gate].m)
+	/* already being used? */
+	if (is_active_gate(&m_prev->ogates, ogate_idx))
 		return -EBUSY;
 
-	m1->gates[gate].m = m2;
-	m1->gates[gate].f = m2->mclass->process_batch;
+	if (igate_idx >= m_next->igates.curr_size) {
+		int ret = grow_gates(m_next, &m_next->igates, igate_idx);
+		if (ret)
+			return ret;
+	}
+
+	ogate = mem_alloc(sizeof(struct gate));
+	if (!ogate)
+		return -ENOMEM;
+
+	m_prev->ogates.arr[ogate_idx] = ogate;
+
+	igate = m_next->igates.arr[igate_idx];
+	if (!igate) {
+		igate = mem_alloc(sizeof(struct gate));
+		if (!igate) {
+			mem_free(ogate);
+			return -ENOMEM;
+		}
+
+		m_next->igates.arr[igate_idx] = igate;
+
+		igate->m = m_next;
+		igate->gate_idx = igate_idx;
+		igate->f = m_next->mclass->process_batch;
+		igate->arg = m_next;
+		cdlist_head_init(&igate->in.ogates_upstream);
+	}
+
+	ogate->m = m_prev;
+	ogate->gate_idx = ogate_idx;
+	ogate->f = m_next->mclass->process_batch;
+	ogate->arg = m_next;
+	ogate->out.igate = igate;
+	ogate->out.igate_idx = igate_idx;
+
+	cdlist_add_tail(&igate->in.ogates_upstream, &ogate->out.igate_upstream);
 
 	return 0;
 }
 
-int disconnect_modules(struct module *m, gate_t gate)
+int disconnect_modules(struct module *m_prev, gate_idx_t ogate_idx)
 {
-	if (gate >= m->allocated_gates)
+	struct gate *ogate;
+	struct gate *igate;
+
+	if (ogate_idx >= m_prev->mclass->num_ogates)
 		return -EINVAL;
 
-	/* no error even if the gate is already pointing to a dead end */
-	m->gates[gate].m = NULL;
-	m->gates[gate].f = deadend;
+	/* no error even if the ogate is unconnected already */
+	if (!is_active_gate(&m_prev->ogates, ogate_idx))
+		return 0;
+
+	ogate = m_prev->ogates.arr[ogate_idx];
+	if (!ogate)
+		return 0;
+
+	igate = ogate->out.igate;
+
+	/* Does the igate become inactive as well? */
+	cdlist_del(&ogate->out.igate_upstream);
+	if (cdlist_is_empty(&igate->in.ogates_upstream)) {
+		struct module *m_next = igate->m;
+		m_next->igates.arr[igate->gate_idx] = NULL;
+		mem_free(igate);	
+	}
+
+	m_prev->ogates.arr[ogate_idx] = NULL;
+	mem_free(ogate);
 
 	return 0;
 }
 
-#if 0
-void set_next_module(struct module *prev, struct module *next)
+static int 
+disconnect_modules_upstream(struct module *m_next, gate_idx_t igate_idx)
 {
-	assert(prev);
-	assert(!prev->ops->add_next_module);
-	assert(prev->num_next_modules == 0);
+	struct gate *igate;
+	struct gate *ogate;
+	struct gate *ogate_next;
 
-	assert(next);
-	assert(next->ops->process_batch);
+	if (igate_idx >= m_next->mclass->num_igates)
+		return -EINVAL;
 
-	prev->next_modules[0] = next;
-	prev->num_next_modules = 1;
+	/* no error even if the igate is unconnected already */
+	if (!is_active_gate(&m_next->igates, igate_idx))
+		return 0;
+
+	igate = m_next->igates.arr[igate_idx];
+	if (!igate)
+		return 0;
+
+	cdlist_for_each_entry_safe(ogate, ogate_next,
+			&igate->in.ogates_upstream, out.igate_upstream)
+	{
+		struct module *m_prev = ogate->m;
+		m_prev->ogates.arr[ogate->gate_idx] = NULL;
+		mem_free(ogate);
+	}
+
+	m_next->igates.arr[igate_idx] = NULL;
+	mem_free(igate);
+
+	return 0;
 }
-
-void add_next_module(struct module *prev, struct module *next, void *arg)
-{
-	assert(prev);
-	assert(prev->ops);
-	assert(prev->ops->add_next_module);
-	assert(prev->num_next_modules < MAX_NEXT_MODULES);
-
-	assert(next);
-	assert(next->ops->process_batch);
-
-	prev->next_modules[prev->num_next_modules] = next;
-	prev->ops->add_next_module(prev, prev->num_next_modules, arg);
-	prev->num_next_modules++;
-}
-#endif
 
 #if 0
 void init_module_worker()
@@ -441,14 +521,13 @@ void _trace_after_call(void)
 }
 #endif
 
-/* currently very slow with linear search */
 struct module *find_module(const char *name)
 {
-	return (struct module *) ns_lookup(NS_TYPE_MODULE, name);
+	return (struct module *)ns_lookup(NS_TYPE_MODULE, name);
 }
 
 #if TCPDUMP_GATES
-int enable_tcpdump(const char* fifo, struct module *m, gate_t gate)
+int enable_tcpdump(const char* fifo, struct module *m, gate_idx_t ogate)
 {
 	static const struct pcap_hdr PCAP_FILE_HDR = {
 		.magic_number = PCAP_MAGIC_NUMBER,
@@ -464,7 +543,7 @@ int enable_tcpdump(const char* fifo, struct module *m, gate_t gate)
 	int ret;
 
 	/* Don't allow tcpdump to be attached to gates that are not active */
-	if (m->gates[gate].m == NULL)
+	if (!is_active_gate(&m->ogates, ogate))
 		return -EINVAL;
 
 	fd = open(fifo, O_WRONLY | O_NONBLOCK);
@@ -485,60 +564,57 @@ int enable_tcpdump(const char* fifo, struct module *m, gate_t gate)
 		return -errno;
 	}
 
-	m->gates[gate].fifo_fd = fd;
-	m->gates[gate].tcpdump = 1;
+	m->ogates.arr[ogate]->fifo_fd = fd;
+	m->ogates.arr[ogate]->tcpdump = 1;
 
 	return 0;
 }
 
-int disable_tcpdump(struct module *m, gate_t gate)
+int disable_tcpdump(struct module *m, gate_idx_t ogate)
 {
-	if (!m->gates[gate].tcpdump)
+	if (!is_active_gate(&m->ogates, ogate))
 		return -EINVAL;
 
-	m->gates[gate].tcpdump = 0;
-	close(m->gates[gate].fifo_fd);
+	if (!m->ogates.arr[ogate]->tcpdump)
+		return -EINVAL;
+
+	m->ogates.arr[ogate]->tcpdump = 0;
+	close(m->ogates.arr[ogate]->fifo_fd);
+
 	return 0;
 }
 
-void dump_pcap_pkts(struct output_gate *gate, struct pkt_batch *batch)
+void dump_pcap_pkts(struct gate *gate, struct pkt_batch *batch)
 {
 	struct timeval tv;
 
 	int ret = 0;
 	int fd = gate->fifo_fd;
-	int packets = 0;
 
 	gettimeofday(&tv, NULL);
 
 	for (int i = 0; i < batch->cnt; i++) {
 		struct snbuf* pkt = batch->pkts[i];
-		int len = pkt->mbuf.data_len;
-		struct pcap_rec_hdr *pkthdr = 
-			(struct pcap_rec_hdr*) snb_prepend(pkt, 
-				sizeof(struct pcap_rec_hdr));
+		struct pcap_rec_hdr rec = {
+			.ts_sec = tv.tv_sec,
+			.ts_usec = tv.tv_usec,
+			.incl_len = pkt->mbuf.data_len,
+			.orig_len = pkt->mbuf.pkt_len,
+		};
 
-		pkthdr->ts_sec = tv.tv_sec;
-		pkthdr->ts_usec = tv.tv_usec;
-		pkthdr->orig_len = pkthdr->incl_len = len;
-		assert(len < PCAP_SNAPLEN);
-		ret = write(fd, snb_head_data(pkt), pkt->mbuf.data_len);
-		assert(pkt->mbuf.data_len < PIPE_BUF);
+		struct iovec vec[2] = {{&rec, sizeof(rec)},
+			{snb_head_data(pkt), snb_head_len(pkt)}};
 
+		ret = writev(fd, vec, 2);
 		if (ret < 0) {
 			if (errno == EPIPE) {
-				log_debug("Stopping dump\n");
+				log_debug("Broken pipe: stopping tcpdump\n");
 				gate->tcpdump = 0;
 				gate->fifo_fd = 0;
 				close(fd);
 			}
 			return;
-		} else {
-			assert(ret == pkt->mbuf.data_len);
-			packets++;
 		}
-
-		snb_adj(pkt, sizeof(struct pcap_rec_hdr));
 	}
 }
 #endif
@@ -649,7 +725,7 @@ again:
 			idle = tsc_hz;
 		log_debug("Worker %d: %5.1f%%, "
 			"loop %4.2fM/%4.2fM, "
-			"idle %.2fus, " 
+			"idle %.2fus, "
 			"busy %.2fus (%.2fus/pkt), "
 			"%lu pkts\n",
 				current_wid,

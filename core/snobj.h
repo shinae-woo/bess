@@ -11,6 +11,7 @@
 
 #include "common.h"
 #include "debug.h"
+#include "mem_alloc.h"
 
 #define MAX_EXPR_LEN	128	/* including the trailing NULL */
 
@@ -66,20 +67,18 @@ struct snobj {
 /* this function does not return (always succeeds) */
 static inline void *_ALLOC(size_t size)
 {
-	void *ret = malloc(size);
+	void *ret = mem_alloc(size);
 
 	/* if memory allocation is fail, we are already screwed. Quit. */
 	if (!ret)
 		oom_crash();
-
-	memset(ret, 0, size);
 
 	return ret;
 }
 
 static inline void *_REALLOC(void *p, size_t new_size)
 {
-	void *ret = realloc(p, new_size);
+	void *ret = mem_realloc(p, new_size);
 	
 	/* if memory allocation is fail, we are already screwed. Quit. */
 	if (!ret)
@@ -104,7 +103,7 @@ static inline void _FREE(void *p)
 	else
 		*t = magic_number;;
 #endif
-	free(p);
+	mem_free(p);
 }
 
 static char *_STRDUP(const char *s)
@@ -214,12 +213,12 @@ static inline size_t snobj_size(const struct snobj *m)
  * returns NULL if not found */
 struct snobj *snobj_eval(const struct snobj *m, const char *expr);
 
-/* snobj_eval_* return 0 or NULL if the key is not found */
+/* snobj_eval_* return 0, NAN, or NULL if the key is not found */
 static inline int64_t snobj_eval_int(const struct snobj *m, const char *expr)
 {
 	m = snobj_eval(m, expr);
 
-	return m && m->type == TYPE_INT ? snobj_int_get(m) : 0;
+	return m ? snobj_int_get(m) : 0;
 }
 
 static inline uint64_t snobj_eval_uint(const struct snobj *m, const char *expr)
@@ -227,18 +226,25 @@ static inline uint64_t snobj_eval_uint(const struct snobj *m, const char *expr)
 	return (uint64_t)snobj_eval_int(m, expr);
 }
 
+static inline double snobj_eval_double(const struct snobj *m, const char *expr)
+{
+	m = snobj_eval(m, expr);
+
+	return m ? snobj_double_get(m) : NAN;
+}
+
 static inline char *snobj_eval_str(const struct snobj *m, const char *expr)
 {
 	m = snobj_eval(m, expr);
 
-	return m && m->type == TYPE_STR ? snobj_str_get(m) : NULL;
+	return m ? snobj_str_get(m) : NULL;
 }
 
 static inline void *snobj_eval_blob(const struct snobj *m, const char *expr)
 {
 	m = snobj_eval(m, expr);
 
-	return m && m->type == TYPE_BLOB ? snobj_blob_get(m) : NULL;
+	return m ? snobj_blob_get(m) : NULL;
 }
 
 static inline int snobj_eval_exists(const struct snobj *m, const char *expr)

@@ -8,11 +8,90 @@ TYPE_BLOB   = 4
 TYPE_LIST   = 5
 TYPE_MAP    = 6
 
-def hexdump(buf):
-    print 'Len=%-5d' % len(buf),
-    for c in buf:
-        print '%02x' % ord(c), 
-    print
+# a custom class that supports both obj[x] and obj.x for convenience
+class SNObjDict(object):
+    def __init__(self):
+        # self._dict = dict() causes a recursive call
+        self.__dict__['_dict'] = dict()
+
+    def __str__(self):
+        return self._dict.__str__()
+
+    def __repr__(self):
+        return self._dict.__repr__()
+
+    def __getattr__(self, name):
+        if name.startswith('__'):
+            return self._dict.__getattribute__(name)
+        else: 
+            return self._dict[name]
+
+    def __setattr__(self, name, value):
+        self._dict[name] = value
+
+    def __delattr__(self, name):
+        del self._dict[name]
+
+    def __getitem__(self, key):
+        return self._dict[key]
+
+    def __setitem__(self, key, value):
+        self._dict[key] = value
+
+    def __delitem__(self, key):
+        del self._dict[key]
+
+    def __contains__(self, key):
+        return key in self._dict
+
+    def __iter__(self):
+        return self._dict.__iter__()
+
+    @staticmethod
+    def __do_op(x, y, op, rop):
+        ret = x.__getattribute__(op)(y)
+        if ret == NotImplemented:
+            ret = y.__getattribute__(rop)(x)
+        return ret
+
+    def __op(a, b, op, rop):
+        a_keys = set(a._keys())
+        if isinstance(b, dict):
+            b_keys = set(b.keys())
+        elif isinstance(b, SNObjDict):
+            b_keys = set(b._keys())
+        elif isinstance(b, (int, float)):
+            ret = SNObjDict()
+            for k in a_keys:
+                ret[k] = a.__do_op(a[k], b, op, rop)
+            return ret
+        else:
+            return NotImplemented
+
+        if a_keys != b_keys:
+            raise TypeError('Attritubes %s are not in common', \
+                    set.symmetric_difference(a_keys, b_keys))
+
+        ret = SNObjDict()
+        for k in a_keys:
+            ret[k] = a.__do_op(a[k], b[k], op, rop)
+        return ret
+
+    def __add__(a, b):
+        return a.__op(b, '__add__', '__radd__')
+
+    def __sub__(a, b):
+        return a.__op(b, '__sub__', '__rsub__')
+
+    def __mul__(a, b):
+        return a.__op(b, '__mul__', '__rmul__')
+
+    def __div__(a, b):
+        return a.__op(b, '__div__', '__rdiv__')
+
+    # intended to be used by controller
+    def _keys(self):
+        return self._dict.keys()
 
 def encode(obj):
     def zero_pad8(buf, num_bytes):
@@ -48,8 +127,10 @@ def encode(obj):
         t = TYPE_LIST
         l = len(obj)
         v = ''.join(map(encode, obj))
-    elif isinstance(obj, dict):
+    elif isinstance(obj, (dict, SNObjDict)):
         t = TYPE_MAP
+        if isinstance(obj, SNObjDict):
+            obj = obj._dict
         keys = sorted(map(str, obj.keys())) # all keys must be a string
         l = len(keys)
         v = ''.join(map(lambda k: encode_cstr(k) + encode(obj[k]), keys))
@@ -84,7 +165,7 @@ def _decode_recur(buf, offset):
             obj, offset = _decode_recur(buf, offset)
             v.append(obj)
     elif t == TYPE_MAP:
-        v = dict()
+        v = SNObjDict()
         for i in xrange(l):
             z_pos = buf.find('\0', offset)
             if z_pos == -1:
@@ -114,5 +195,8 @@ def decode(buf):
                     (len(buf), consumed))
         return obj
     except Exception as e:
-        hexdump(buf)
+        print >> sys.stderr, 'Decoding error. Len=%-5d' % len(buf),
+        for c in buf:
+            print >> sys.stderr, '%02x' % ord(c), 
+        print >> sys.stderr
         raise e

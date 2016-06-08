@@ -18,25 +18,25 @@ def measure():
     new_stats = []
 
     for port in ports:
-        old_stats.append(softnic.get_port_stats(port.name))
+        old_stats.append(bess.get_port_stats(port.name))
 
     time.sleep(INTERVAL)
 
     for port in ports:
-        new_stats.append(softnic.get_port_stats(port.name))
+        new_stats.append(bess.get_port_stats(port.name))
 
     out_mpps = []
     inc_mpps = []
 
     for i in range(len(ports)):
-        time_diff = new_stats[i]['timestamp'] - old_stats[i]['timestamp']
+        time_diff = new_stats[i].timestamp - old_stats[i].timestamp
 
-        pkts_diff = new_stats[i]['out']['packets'] - \
-                    old_stats[i]['out']['packets']
+        pkts_diff = new_stats[i].out.packets - \
+                    old_stats[i].out.packets
         out_mpps.append(pkts_diff / time_diff / 1000000.0)
         
-        pkts_diff = new_stats[i]['inc']['packets'] - \
-                    old_stats[i]['inc']['packets']
+        pkts_diff = new_stats[i].inc.packets - \
+                    old_stats[i].inc.packets
         inc_mpps.append(pkts_diff / time_diff / 1000000.0)
 
     print '%-15s' % 'CPU',
@@ -75,6 +75,6 @@ for cpu in range(CORE_START, CORE_END, CORE_STEP):
     Source() -> PortOut(port=v)
     PortInc(port=v) -> Sink()
 
-    softnic.resume_all()
+    bess.resume_all()
     measure()
-    softnic.pause_all()
+    bess.pause_all()

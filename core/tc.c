@@ -3,12 +3,12 @@
 
 #include <sys/time.h>
 
-#include <rte_common.h>
-#include <rte_malloc.h>
+#include <rte_config.h>
 #include <rte_cycles.h>
 
-#include "debug.h"
 #include "common.h"
+#include "opts.h"
+#include "debug.h"
 #include "time.h"
 #include "task.h"
 #include "worker.h"
@@ -27,17 +27,17 @@ static void tc_add_to_parent_pgroup(struct tc *c, int share_resource)
 	struct cdlist_item *next;
 
 	cdlist_for_each_entry(g, &parent->pgroups, tc) {
-		if (c->priority > g->priority) {
+		if (c->settings.priority > g->priority) {
 			next = &g->tc;
 			goto pgroup_init;
-		} else if (c->priority == g->priority)
+		} else if (c->settings.priority == g->priority)
 			goto pgroup_add;
 	}
 
 	next = (struct cdlist_item *)&parent->pgroups;
 
 pgroup_init:
-	g = rte_zmalloc("pgroup", sizeof(*g), 0);
+	g = mem_alloc(sizeof(*g));
 	if (!g)
 		oom_crash();
 
@@ -46,7 +46,7 @@ pgroup_init:
 	heap_init(&g->pq);
 
 	g->resource = share_resource;
-	g->priority = c->priority;
+	g->priority = c->settings.priority;
 
 	/* fall through */
 
@@ -74,17 +74,17 @@ struct tc *tc_init(struct sched *s, const struct tc_params *params)
 	assert(params->share > 0);
 	assert(params->share <= MAX_SHARE);
 
-	c = rte_zmalloc("tc", sizeof(*c), 0);
+	c = mem_alloc(sizeof(*c));
 	if (!c)
 		oom_crash();
 
 	ret = ns_insert(NS_TYPE_TC, params->name, c);
 	if (ret < 0) {
-		rte_free(c);
+		mem_free(c);
 		return err_to_ptr(ret);
 	}
 
-	strcpy(c->name, params->name);
+	c->settings = *params;
 
 	tc_inc_refcnt(c);	/* held by user (the owner) */
 
@@ -93,8 +93,6 @@ struct tc *tc_init(struct sched *s, const struct tc_params *params)
 
 	c->parent = params->parent ? : &s->root;
 	tc_inc_refcnt(c->parent);
-
-	c->auto_free = params->auto_free;
 
 	c->last_tsc = rdtsc();
 
@@ -120,7 +118,6 @@ struct tc *tc_init(struct sched *s, const struct tc_params *params)
 	cdlist_head_init(&c->tasks);
 	cdlist_head_init(&c->pgroups);
 
-	c->priority = params->priority;
 	tc_add_to_parent_pgroup(c, params->share_resource);
 
 	cdlist_add_tail(&s->tcs_all, &c->sched_all);
@@ -132,7 +129,9 @@ void _tc_do_free(struct tc *c)
 {
 	struct pgroup *g = c->ss.my_pgroup;
 	struct tc *parent = c->parent;
-	
+
+	int ret;
+
 	assert(c->refcnt == 0);
 
 	assert(!c->state.queued);
@@ -146,17 +145,20 @@ void _tc_do_free(struct tc *c)
 		if (g->num_children == 0) {
 			cdlist_del(&g->tc);
 			heap_close(&g->pq);
-			rte_free(g);
+			mem_free(g);
 		}
 
 		cdlist_del(&c->sched_all);
 		c->s->num_classes--;
 	}
 
-	ns_remove(c->name);
+	if (parent) {
+		ret = ns_remove(c->settings.name);
+		assert(ret == 0);
+	}
 
 	memset(c, 0, sizeof(*c));	/* zero out to detect potential bugs */
-	rte_free(c);			/* Note: c is struct sched, if root */
+	mem_free(c);			/* Note: c is struct sched, if root */
 	
 	if (parent)
 		tc_dec_refcnt(parent);
@@ -204,7 +206,7 @@ struct sched *sched_init()
 {
 	struct sched *s;
 
-	s = rte_zmalloc("sched", sizeof(*s), 0);
+	s = mem_alloc(sizeof(*s));
 	if (!s)
 		oom_crash();
 
@@ -227,12 +229,15 @@ void sched_free(struct sched *s)
 	struct tc *next;
 
 	cdlist_for_each_entry_safe(c, next, &s->tcs_all, sched_all) {
-		if (c->state.queued) {
+		int queued = c->state.queued;
+		int throttled = c->state.throttled;
+
+		if (queued) {
 			c->state.queued = 0;
 			tc_dec_refcnt(c);
 		}
 
-		if (c->state.throttled) {
+		if (throttled) {
 			c->state.throttled = 0;
 			tc_dec_refcnt(c);
 		}
@@ -395,7 +400,7 @@ static int tc_account(struct sched *s, struct tc *c,
 			if (wait_tsc > max_wait_tsc)
 				max_wait_tsc = wait_tsc;
 		} else
-			c->tb[i].tokens = RTE_MIN(tokens - consumed, 
+			c->tb[i].tokens = MIN(tokens - consumed, 
 					c->tb[i].max_burst);
 	}
 
@@ -491,7 +496,7 @@ static char *print_tc_stats_detail(struct sched *s, char *p, int max_cnt)
 
 	cdlist_for_each_entry(c, &s->tcs_all, sched_all) {
 		if (num_printed < max_cnt) {
-			p += sprintf(p, "%12s", c->name);
+			p += sprintf(p, "%12s", c->settings.name);
 		} else {
 			p += sprintf(p, " ...");
 			break;
@@ -559,7 +564,7 @@ static char *print_tc_stats_simple(struct sched *s, char *p, int max_cnt)
 		c->last_stats = c->stats;
 
 		p += sprintf(p, "\tC%s %.1f%%(%.2fM) %.3fMpps %.1fMbps", 
-				c->name, 
+				c->settings.name, 
 				cycles * 100.0 / tsc_hz, 
 				cnt / 1000000.0,
 				pkts / 1000000.0, 
@@ -651,6 +656,8 @@ void sched_loop(struct sched *s)
 	uint64_t checkpoint;
 	uint64_t now;
 
+	const double ns_per_cycle = 1e9 / tsc_hz;
+
 	last_print_tsc = checkpoint = now = rdtsc();
 
 	/* the main scheduling - running - accounting loop */
@@ -681,6 +688,7 @@ void sched_loop(struct sched *s)
 		if (c) {
 			/* Running (R) */
 			ctx.current_tsc = now;	/* tasks see updated tsc */
+			ctx.current_ns = now * ns_per_cycle;
 			ret = tc_scheduled(c);
 
 			now = rdtsc();

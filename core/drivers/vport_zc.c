@@ -5,8 +5,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <rte_malloc.h>
 #include <rte_config.h>
+#include <rte_malloc.h>
 
 #include "../driver.h"
 #include "../port.h"
@@ -40,8 +40,8 @@ struct vport_bar {
 
 	/* The term RX/TX could be very confusing for a virtual switch.
 	 * Instead, we use the "incoming/outgoing" convention:
-	 * - incoming: outside -> SoftNIC
-	 * - outgoing: SoftNIC -> outside */
+	 * - incoming: outside -> BESS
+	 * - outgoing: BESS -> outside */
 	int num_inc_q;
 	int num_out_q;
 

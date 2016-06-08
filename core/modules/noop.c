@@ -12,8 +12,11 @@ noop_run_task(struct module *m, void *arg)
 }
 
 static const struct mclass noop = {
-	.name = "NoOP",
-	.run_task = noop_run_task,
+	.name 		= "NoOP",
+	.help		= "creates a task that does nothing",
+	.num_igates	= 0,
+	.num_ogates	= 0,
+	.run_task 	= noop_run_task,
 };
 
 ADD_MCLASS(noop)

@@ -17,18 +17,6 @@
 #include "snstore.h"
 #include "dpdk.h"
 
-static void set_lcore_bitmap(char *buf)
-{
-	int off = 0;
-	int i;
-
-	/* launch everything on core 0 for now */
-	for (i = 0; i < MAX_WORKERS; i++)
-		off += sprintf(buf + off, "%d@0,", i);
-
-	off += sprintf(buf + off, "%d@%d", RTE_MAX_LCORE - 1, 0);
-}
-
 static int get_numa_count()
 {
 	FILE *fp;
@@ -86,7 +74,7 @@ static cookie_io_functions_t dpdk_log_funcs = {
 	.write = &dpdk_log_writer,
 };
 
-static void init_eal(char *prog_name)
+static void init_eal(char *prog_name, int mb_per_socket, int multi_instance)
 {
 	int rte_argc = 0;
 	char *rte_argv[16];
@@ -94,8 +82,7 @@ static void init_eal(char *prog_name)
 	char opt_master_lcore[1024];
 	char opt_lcore_bitmap[1024];
 	char opt_socket_mem[1024];
-
-	const char *socket_mem = "2048";
+	char opt_file_prefix[1024];
 
 	int numa_count = get_numa_count();
 
@@ -105,12 +92,14 @@ static void init_eal(char *prog_name)
 	FILE *org_stdout;
 
 	sprintf(opt_master_lcore, "%d", RTE_MAX_LCORE - 1);
+	sprintf(opt_lcore_bitmap, "%d@%d", RTE_MAX_LCORE - 1, 0);
 
-	set_lcore_bitmap(opt_lcore_bitmap);
+	if (mb_per_socket <= 0)
+		mb_per_socket = 2048;
 
-	sprintf(opt_socket_mem, "%s", socket_mem);
+	sprintf(opt_socket_mem, "%d", mb_per_socket);
 	for(i = 1; i < numa_count; i++)
-		sprintf(opt_socket_mem + strlen(opt_socket_mem), ",%s", socket_mem);
+		sprintf(opt_socket_mem + strlen(opt_socket_mem), ",%d", mb_per_socket);
 
 	rte_argv[rte_argc++] = prog_name;
 	rte_argv[rte_argc++] = "--master-lcore";
@@ -125,6 +114,14 @@ static void init_eal(char *prog_name)
 #else
 	rte_argv[rte_argc++] = "--no-huge";
 #endif
+	if (multi_instance) {
+		sprintf(opt_file_prefix, "rte%lld", (long long)getpid());
+		/* Casting to long long isn't guaranteed by POSIX to not lose
+                 * any information, but should be okay for Linux and BSDs for
+                 * the foreseeable future. */
+		rte_argv[rte_argc++] = "--file-prefix";
+		rte_argv[rte_argc++] = opt_file_prefix;
+	}
 	rte_argv[rte_argc] = NULL;
 
 	/* reset getopt() */
@@ -154,7 +151,7 @@ static void init_timer()
 	rte_timer_subsystem_init();
 }
 
-#if DPDK < DPDK_VER(2, 0, 0)
+#if DPDK_VER < DPDK_VER_NUM(2, 0, 0)
   #error DPDK 2.0.0 or higher is required
 #endif
 
@@ -172,9 +169,9 @@ static void announce_cpumask()
 #endif
 }
 
-void init_dpdk(char *prog_name)
+void init_dpdk(char *prog_name, int mb_per_socket, int multi_instance)
 {
-	init_eal(prog_name);
+	init_eal(prog_name, mb_per_socket, multi_instance);
 
 	tsc_hz = rte_get_tsc_hz();
 

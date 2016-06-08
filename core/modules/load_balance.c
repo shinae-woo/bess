@@ -132,6 +132,12 @@ command_set_chashing(struct module *m, const char *cmd, struct snobj *arg)
 static struct snobj *
 lb_init(struct module *m, struct snobj *arg)
 {	
+	struct lb_priv* priv = get_priv(m);
+
+	/* default rule is load balancing based on 'src_ip' and 'dst_ip' */
+	priv->rule.offset = 26;
+	priv->rule.size = 8;
+
 	if (arg)
 		return command_set_num_gates(m, NULL, arg);
 	else

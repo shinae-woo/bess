@@ -20,12 +20,13 @@ assert(len(pkt_bytes) == pkt_size)
 
 # load balance into 2 clients
 src::Source() \
-        -> Rewrite(templates=[pkt_bytes]) \
-        -> RandomUpdate(vars=[{'offset': 26, 'size': 1, \
+        -> Rewrite([pkt_bytes]) \
+        -> RandomUpdate([{'offset': 26, 'size': 1, \
         'min': 1, 'max':1 + num_flows - 1}]) \
         -> lb::LoadBalance(2)
+
+lb.set_rule({'offset': 26, 'size': 1})
 sink::Sink()
 
-lb[0] -> sink
-lb[1] -> sink
-lb[2] -> sink # default packets not be load balanced
+lb:0 -> sink
+lb:1 -> sink

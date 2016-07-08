@@ -95,6 +95,38 @@ command_get_summary(struct module *m, const char *cmd, struct snobj *arg)
 	return r;
 }
 
+struct snobj *
+command_clear_latency_summary(struct module *m, const char *cmd, struct snobj *arg)
+{
+	struct measure_priv *priv = get_priv(m);
+	clear_hist(&priv->hist);
+
+	return NULL;
+}
+
+struct snobj *
+command_get_latency_summary(struct module *m, const char *cmd, struct snobj *arg)
+{
+	struct measure_priv *priv = get_priv(m);
+	
+	// min, max, 5 tiles for 1-, 25-, 50-, 75- 99-%tiles in order
+	struct histo_summary latencies = {0};
+
+	get_hist_summary(&priv->hist, &latencies);
+	
+	struct snobj *r = snobj_map();
+
+	snobj_map_set(r, "min", snobj_double(latencies.min));
+	snobj_map_set(r, "max", snobj_double(latencies.max));
+	snobj_map_set(r, "ptiles_1", snobj_double(latencies.ptiles[0]));
+	snobj_map_set(r, "ptiles_25", snobj_double(latencies.ptiles[1]));
+	snobj_map_set(r, "ptiles_50", snobj_double(latencies.ptiles[2]));
+	snobj_map_set(r, "ptiles_75", snobj_double(latencies.ptiles[3]));
+	snobj_map_set(r, "ptiles_99", snobj_double(latencies.ptiles[4]));
+
+	return r;
+}
+
 static const struct mclass measure = {
 	.name 		= "Measure",
 	.help		= 
@@ -106,6 +138,8 @@ static const struct mclass measure = {
 	.process_batch 	= measure_process_batch,
 	.commands	 = {
 		{"get_summary", command_get_summary},
+		{"clear_latency_summary", command_clear_latency_summary},
+		{"get_latency_summary", command_get_latency_summary},
 	}
 };
 

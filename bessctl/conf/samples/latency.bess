@@ -8,14 +8,19 @@ v = Port(driver='VPort', loopback=1, rxq_cpu=1)
 Source() -> Timestamp() -> PortOut(port=v)
 PortInc(port=v) -> m::Measure() -> Sink()
 
+bess.pause_all()
 last = m.get_summary()
+bess.resume_all()
 
 while True:
-    bess.resume_all()
     time.sleep(1)
-    bess.pause_all()
 
+    bess.pause_all()
     now = m.get_summary()
+    latencies = m.get_latency_summary()
+    m.clear_latency_summary()
+    bess.resume_all()
+    
     diff = last - now
     diff /= diff.timestamp
     last = now
@@ -25,8 +30,11 @@ while True:
     else:
         ns_per_packet = 0
 
-    print '%s: %.3f Mpps, %.3f Mbps, %.3f us' % \
+    print '%s: %.3f Mpps, %.3f Mbps, avg %.3f us, min %.3f us, max %.3f us, 99%% %.3f us' % \
             (time.ctime(now.timestamp),
              diff.packets / 1e6, 
              diff.bits / 1e6, 
-             ns_per_packet / 1e3)
+             ns_per_packet / 1e3,
+             latencies.min / 1e3,
+             latencies.max / 1e3,
+             latencies.ptiles_99 / 1e3)

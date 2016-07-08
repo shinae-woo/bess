@@ -21,6 +21,11 @@ struct histogram {
 	histo_count_t above_threshold;
 };
 
+struct histo_summary {
+	uint64_t min;
+	uint64_t max;
+	uint64_t ptiles[5];
+};
 
 static inline uint64_t get_time() {
 	double t = rte_get_tsc_cycles();
@@ -146,6 +151,64 @@ static void print_summary(struct histogram* hist) {
 	printf("##   Total: %lu\n", count);
 }
 
+static void get_hist_summary(struct histogram *hist, 
+		struct histo_summary *latencies) {
+	
+	uint64_t total = 0;
+	uint64_t count = 0;
+	uint64_t min = 0;
+	uint64_t max = 0;
+	int max_bucket=0;
+	int found_min = 0;
+	const int timeunit_mult = choose_unit_mult(HISTO_TIMEUNIT_MULT);
+
+	histo_count_t *arr = hist->arr;
+	for(int i=0; i<HISTO_BUCKETS; i++) {
+		size_t current_size = HISTO_BUCKET_VAL(arr+i);
+		uint64_t latency = (i+1)*HISTO_TIME*timeunit_mult;
+		if (!found_min && current_size > 0) {
+			min = latency;
+			found_min = 1;
+		}
+		if (current_size > 0) {
+			max = latency;
+			max_bucket=i;
+		}
+		histo_count_t* bucket = arr + i;
+		uint64_t samples = HISTO_BUCKET_VAL(bucket);
+		count += samples;
+		*bucket = count;
+		total += (samples * latency);
+	}
+	
+	if (count == 0) {
+		printf("No data recorded");
+		memset(latencies, 0, sizeof(*latencies));
+		return;
+	}
+		
+	latencies->min = min;
+	latencies->max = max;
+	
+	// Indexes for percentile
+	uint64_t counts[] =	{count / 100, 	// 1%-tile
+		(count * 25) / 100,				// 25%-tile
+		(count * 50) / 100,				// 50%-tile (Median)
+		(count * 25) / 100,				// 75%-tile
+		(count * 99) / 100}; 			// 99%-tile
+	
+	for (int i=0; i<max_bucket; i++) {
+		uint64_t latency = (i+1)*HISTO_TIME*timeunit_mult;
+		for (int j=0; j<sizeof(counts)/sizeof(uint64_t) &&
+				j<sizeof(latencies->ptiles)/sizeof(uint64_t); j++) {
+			if(HISTO_BUCKET_VAL(arr + i) < counts[j]) {
+				latencies->ptiles[j] = latency;
+			} 
+		}
+	}
+	
+}
+
 static inline void record_latency(struct histogram* hist, uint64_t latency) {
 	if (latency >= HISTO_HARD_TIMEOUT) {
 		hist->above_threshold++;
@@ -157,6 +220,10 @@ static inline void record_latency(struct histogram* hist, uint64_t latency) {
 
 static inline void init_hist(struct histogram* hist) {
 	hist->arr = mem_alloc(HISTO_BUCKETS * sizeof(histo_count_t));
+}
+
+static inline void clear_hist(struct histogram* hist) {
+	memset(hist->arr, 0, HISTO_BUCKETS * sizeof(histo_count_t));
 }
 
 #endif

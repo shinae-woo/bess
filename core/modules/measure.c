@@ -24,9 +24,18 @@ static struct snobj *measure_init(struct module *m, struct snobj *arg)
 	if (arg)
 		priv->warmup = snobj_eval_int(arg, "warmup");
 
-	init_hist(&priv->hist);
+	int ret = init_hist(&priv->hist);
+	if (ret < 0)
+		return snobj_errno(-ret);
 
 	return NULL;
+}
+
+static void measure_deinit(struct module *m)
+{
+	struct measure_priv *priv = get_priv(m);
+
+	deinit_hist(&priv->hist);
 }
 
 static inline int get_measure_packet(struct snbuf* pkt, uint64_t* time)
@@ -135,6 +144,7 @@ static const struct mclass measure = {
 	.num_ogates	= 1,
 	.priv_size	= sizeof(struct measure_priv),
 	.init 		= measure_init,
+	.deinit 		= measure_deinit,
 	.process_batch 	= measure_process_batch,
 	.commands	 = {
 		{"get_summary", command_get_summary},

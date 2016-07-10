@@ -218,8 +218,15 @@ static inline void record_latency(struct histogram* hist, uint64_t latency) {
 	}
 }
 
-static inline void init_hist(struct histogram* hist) {
+static inline int init_hist(struct histogram* hist) {
 	hist->arr = mem_alloc(HISTO_BUCKETS * sizeof(histo_count_t));
+	if (!hist->arr)
+		return -ENOMEM;
+	return 0;
+}
+
+static inline void deinit_hist(struct histogram* hist) {
+	mem_free(hist->arr);
 }
 
 static inline void clear_hist(struct histogram* hist) {

@@ -354,12 +354,12 @@ static const struct driver pmd = {
 	.priv_size	= sizeof(struct pmd_priv),
 	.def_size_inc_q = 256,
 	.def_size_out_q = 256,
-	.flags		= DRIVER_FLAG_SELF_INC_STATS |
-			  DRIVER_FLAG_SELF_OUT_STATS,
+//	.flags		= DRIVER_FLAG_SELF_INC_STATS |
+//			  DRIVER_FLAG_SELF_OUT_STATS,
 	.init_driver	= pmd_init_driver,
 	.init_port 	= pmd_init_port,
 	.deinit_port	= pmd_deinit_port,
-	.collect_stats	= pmd_collect_stats,
+//	.collect_stats	= pmd_collect_stats,
 	.recv_pkts 	= pmd_recv_pkts,
 	.send_pkts 	= pmd_send_pkts,
 };

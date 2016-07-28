@@ -12,13 +12,6 @@
 #include "../port.h"
 #include "../snbuf.h"
 
-#define SLOTS_PER_LLRING	1024
-
-/* This watermark is to detect congestion and cache bouncing due to
- * head-eating-tail (needs at least 8 slots less then the total ring slots).
- * Not sure how to tune this... */
-#define SLOTS_WATERMARK		((SLOTS_PER_LLRING >> 3) * 7)	/* 87.5% */
-
 /* Disable (0) single producer/consumer mode for now.
  * This is slower, but just to be on the safe side. :) */
 #define SINGLE_P		0
@@ -72,6 +65,9 @@ static struct snobj *vport_init_port(struct port *p, struct snobj *arg)
 	int num_inc_q = p->num_queues[PACKET_DIR_INC];
 	int num_out_q = p->num_queues[PACKET_DIR_OUT];
 
+	int size_inc_q = p->queue_size[PACKET_DIR_INC];
+	int size_out_q = p->queue_size[PACKET_DIR_OUT];
+
 	int bytes_per_llring;
 	int total_bytes;
 	uint8_t *ptr;
@@ -82,7 +78,7 @@ static struct snobj *vport_init_port(struct port *p, struct snobj *arg)
 	FILE* fp;
 	size_t bar_address;
 
-	bytes_per_llring = llring_bytes_with_slots(SLOTS_PER_LLRING);
+	bytes_per_llring = llring_bytes_with_slots(size_inc_q);
 	total_bytes =	sizeof(struct vport_bar) +
 			(bytes_per_llring * (num_inc_q + num_out_q)) +
 			(sizeof(struct vport_inc_regs) * (num_inc_q)) +
@@ -105,9 +101,9 @@ static struct snobj *vport_init_port(struct port *p, struct snobj *arg)
 			(struct vport_inc_regs*)ptr;
 		ptr += sizeof(struct vport_inc_regs);
 
-		llring_init((struct llring *)ptr, SLOTS_PER_LLRING,
+		llring_init((struct llring *)ptr, size_inc_q,
 				SINGLE_P, SINGLE_C);
-		llring_set_water_mark((struct llring *)ptr, SLOTS_WATERMARK);
+		llring_set_water_mark((struct llring *)ptr, (size_inc_q >> 3) * 7);
 		bar->inc_qs[i] = (struct llring *)ptr;
 		priv->inc_qs[i] = bar->inc_qs[i];
 		ptr += bytes_per_llring;
@@ -119,9 +115,9 @@ static struct snobj *vport_init_port(struct port *p, struct snobj *arg)
 			(struct vport_out_regs*)ptr;
 		ptr += sizeof(struct vport_out_regs);
 
-		llring_init((struct llring *)ptr, SLOTS_PER_LLRING,
+		llring_init((struct llring *)ptr, size_inc_q,
 				SINGLE_P, SINGLE_C);
-		llring_set_water_mark((struct llring *)ptr, SLOTS_WATERMARK);
+		llring_set_water_mark((struct llring *)ptr, (size_out_q >> 3) * 7);
 		bar->out_qs[i] = (struct llring *)ptr;
 		priv->out_qs[i] = bar->out_qs[i];
 		ptr += bytes_per_llring;

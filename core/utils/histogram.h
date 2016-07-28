@@ -194,7 +194,7 @@ static void get_hist_summary(struct histogram *hist,
 	uint64_t counts[] =	{count / 100, 	// 1%-tile
 		(count * 25) / 100,				// 25%-tile
 		(count * 50) / 100,				// 50%-tile (Median)
-		(count * 25) / 100,				// 75%-tile
+		(count * 75) / 100,				// 75%-tile
 		(count * 99) / 100}; 			// 99%-tile
 	
 	for (int i=0; i<max_bucket; i++) {

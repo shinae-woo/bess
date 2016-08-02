@@ -41,7 +41,7 @@ static void load_mempool(void)
 {
 	/* Try pframe pool on node 0 first */
 	const int BEGIN = 16384;
-	const int END = 524288;
+	const int END = 2097152;
 	char name[256];
 	for (int i = BEGIN; i <= END; i *= 2) {
 		sprintf(name, "pframe0_%dk", (i + 1) / 1024);

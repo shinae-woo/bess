@@ -42,7 +42,7 @@ static void init_mempool_socket(int sid)
 	struct rte_pktmbuf_pool_private pool_priv;
 	char name[256];
 
-	const int initial_try = 524288;
+	const int initial_try = 2097152;
 	const int minimum_try = 16384;
 	int current_try = initial_try;
 

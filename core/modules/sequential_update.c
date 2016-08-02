@@ -10,9 +10,8 @@ struct supdate_priv {
 		uint32_t min;
 		uint32_t range;		/* == max - min + 1 */
 		int16_t offset;
+		uint64_t idx;
 	} vars[MAX_VARS];
-
-	uint64_t idx;
 };
 
 static struct snobj *
@@ -85,12 +84,20 @@ command_add(struct module *m, const char *cmd, struct snobj *arg)
 		priv->vars[curr + i].offset = offset;
 		priv->vars[curr + i].mask = mask;
 		priv->vars[curr + i].min = min;
+		priv->vars[curr + i].idx = 0;
 
 		/* avoid modulo 0 */
 		priv->vars[curr + i].range = (max - min + 1) ? : 0xffffffff;
+
+		printf("idx: %d offset: %u min: %u range: %u", 
+				curr+i, 
+				priv->vars[curr+i].offset, 
+				priv->vars[curr+i].min, 
+				priv->vars[curr+i].range);
 	}
 
 	priv->num_vars = curr + arg->size;
+
 
 	return NULL;
 }
@@ -109,7 +116,10 @@ static struct snobj *supdate_init(struct module *m, struct snobj *arg)
 {
 	struct supdate_priv *priv = get_priv(m);
 
-	priv->idx = 0;
+	for (int i = 0; i < priv->num_vars; i++) {
+		struct var *var = &priv->vars[i];
+		var->idx = 0;
+	}
 
 	if (arg)
 		return command_add(m, NULL, arg);
@@ -124,26 +134,28 @@ static void supdate_process_batch(struct module *m, struct pkt_batch *batch)
 	int cnt = batch->cnt;
 
 	for (int i = 0; i < priv->num_vars; i++) {
-		const struct var *var = &priv->vars[i];
+		struct var *var = &priv->vars[i];
 
 		uint32_t mask = var->mask;
 		uint32_t min = var->min;
 		uint32_t range = var->range;
 		int16_t offset = var->offset;
+		uint32_t idx = var->idx;
 			
 		for (int j = 0; j < cnt; j++) {
 			struct snbuf *snb = batch->pkts[j];
 			char *head = snb_head_data(snb);
 
 			uint32_t * restrict p;
-			uint32_t updated_val = priv->idx;
-			priv->idx++;
-			if (priv->idx == range)
-				priv->idx = 0;
+			uint32_t updated_val = idx;
 
 			p = (uint32_t *)(head + offset);
 			*p = (*p & mask) | rte_cpu_to_be_32(min + updated_val);
 		}
+		
+		var->idx++;
+		if (var->idx == range)
+			var->idx = 0;
 	}
 
 	run_next_module(m, batch);

@@ -88,12 +88,6 @@ command_add(struct module *m, const char *cmd, struct snobj *arg)
 
 		/* avoid modulo 0 */
 		priv->vars[curr + i].range = (max - min + 1) ? : 0xffffffff;
-
-		printf("idx: %d offset: %u min: %u range: %u", 
-				curr+i, 
-				priv->vars[curr+i].offset, 
-				priv->vars[curr+i].min, 
-				priv->vars[curr+i].range);
 	}
 
 	priv->num_vars = curr + arg->size;

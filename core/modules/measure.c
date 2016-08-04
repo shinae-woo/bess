@@ -75,12 +75,12 @@ static void measure_process_batch(struct module *m, struct pkt_batch *batch)
 {
 	struct measure_priv *priv = get_priv(m);
 
-	uint64_t time = get_time();
+	uint64_t time = ctx.current_ns;
 
 	if (priv->start_time == 0)
-		priv->start_time = get_time();
+		priv->start_time = ctx.current_ns;
 
-	if (HISTO_TIME_TO_SEC(time - priv->start_time) < priv->warmup)
+	if ((time - priv->start_time) / 1e9 < priv->warmup)
 		goto skip;
 
 	priv->pkt_cnt += batch->cnt;

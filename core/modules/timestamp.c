@@ -17,7 +17,7 @@ timestamp_packet(struct snbuf* pkt, uint64_t time)
 static void
 timestamp_process_batch(struct module *m, struct pkt_batch *batch)
 {
-	uint64_t time = get_time();
+	uint64_t time = ctx.current_ns;
 
 	for (int i = 0; i < batch->cnt; i++)
 		timestamp_packet(batch->pkts[i], time);

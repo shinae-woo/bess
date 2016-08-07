@@ -7,10 +7,12 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <assert.h>
+#include <x86intrin.h>
 
 #ifdef __cplusplus
 #define ct_assert(p)	static_assert(p, "Compile-time assertion failure")
 #else
+
 #define ct_assert(p)	_Static_assert(p, "Compile-time assertion failure")
 #endif
 
@@ -41,7 +43,9 @@
 	 	_a >= _b ? _a : _b; \
 	 })
 
-#define ACCESS_ONCE(x) (*(volatile typeof(x) *)&(x))
+#define ARR_SIZE(arr)	(sizeof(arr) / sizeof(arr[0]))
+
+#define ACCESS_ONCE(x) 	(*(volatile typeof(x) *)&(x))
 
 static inline uint64_t align_floor(uint64_t v, uint64_t align)
 {
@@ -104,5 +108,24 @@ static inline int is_be_system()
 #define LOAD_BARRIER()		INST_BARRIER()
 #define STORE_BARRIER()		INST_BARRIER()
 #define FULL_BARRIER()		asm volatile("mfence":::"memory")
+
+/* src/dst addresses and their sizes must be a multiple of SIMD register size */
+static inline void
+memcpy_sloppy(void * restrict dst, const void * restrict src, size_t n)
+{
+#if __AVX2__
+	typedef __m256i block_t;
+#else
+	typedef __m128i block_t;
+#endif
+	block_t * restrict d = dst;
+	const block_t * restrict s = src;
+
+	int bytes_left = n;
+	while (bytes_left > 0) {
+		*d++ = *s++;
+		bytes_left -= sizeof(block_t);
+	}
+}
 
 #endif

@@ -20,29 +20,58 @@ static struct snobj *rewrite_init(struct module *m, struct snobj *arg)
 {
 	if (arg)
 		return command_add(m, NULL, arg);
-	
+
 	return NULL;
+}
+
+static inline void
+do_rewrite_single(struct rewrite_priv *priv, struct pkt_batch *batch)
+{
+	const int cnt = batch->cnt;
+	uint16_t size = priv->template_size[0];
+	void *template = priv->templates[0];
+
+	for (int i = 0; i < cnt; i++) {
+		struct snbuf *pkt = batch->pkts[i];
+		char *ptr = pkt->mbuf.buf_addr + SNBUF_HEADROOM;
+
+		pkt->mbuf.data_off = SNBUF_HEADROOM;
+		pkt->mbuf.pkt_len = size;
+		pkt->mbuf.data_len = size;
+
+		memcpy_sloppy(ptr, template, size);
+	}
+}
+
+static inline void
+do_rewrite(struct rewrite_priv *priv, struct pkt_batch *batch)
+{
+	int start = priv->next_turn;
+	const int cnt = batch->cnt;
+
+	for (int i = 0; i < cnt; i++) {
+		uint16_t size = priv->template_size[start + i];
+		struct snbuf *pkt = batch->pkts[i];
+		char *ptr = pkt->mbuf.buf_addr + SNBUF_HEADROOM;
+
+		pkt->mbuf.data_off = SNBUF_HEADROOM;
+		pkt->mbuf.pkt_len = size;
+		pkt->mbuf.data_len = size;
+
+		memcpy_sloppy(ptr, priv->templates[start + i], size);
+	}
+
+	priv->next_turn = (start + cnt) % priv->num_templates;
 }
 
 static void rewrite_process_batch(struct module *m, struct pkt_batch *batch)
 {
 	struct rewrite_priv *priv = get_priv(m);
 
-	if (priv->num_templates) {
-		int start = priv->next_turn;
-		const int cnt = batch->cnt;
-
-		for (int i = 0; i < cnt; i++) {
-			struct snbuf *snb = batch->pkts[i];
-			char *ptr = snb_head_data(snb);
-			uint16_t size = priv->template_size[start + i];
-
-			snb->mbuf.pkt_len = snb->mbuf.data_len = size;
-			rte_memcpy(ptr, priv->templates[start + i], size);
-		}
-
-		priv->next_turn = (start + cnt) % priv->num_templates;
-	}
+	if (priv->num_templates == 1)
+		do_rewrite_single(priv, batch);
+	else if (priv->num_templates > 1)
+		do_rewrite(priv, batch);
 
 	run_next_module(m, batch);
 }
@@ -73,7 +102,7 @@ command_add(struct module *m, const char *cmd, struct snobj *arg)
 			return snobj_err(EINVAL, "template is too big");
 
 		memset(priv->templates[curr + i], 0, MAX_TEMPLATE_SIZE);
-		memcpy(priv->templates[curr + i], snobj_blob_get(template), 
+		memcpy(priv->templates[curr + i], snobj_blob_get(template),
 				template->size);
 		priv->template_size[curr + i] = template->size;
 	}
@@ -82,7 +111,7 @@ command_add(struct module *m, const char *cmd, struct snobj *arg)
 
 	for (i = priv->num_templates; i < SLOTS; i++) {
 		int j = i % priv->num_templates;
-		memcpy(priv->templates[i], priv->templates[j], 
+		memcpy(priv->templates[i], priv->templates[j],
 				priv->template_size[j]);
 		priv->template_size[i] = priv->template_size[j];
 	}

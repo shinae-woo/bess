@@ -3,7 +3,9 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdarg.h>
+#include <time.h>
 #include <sys/types.h>
+#include <linux/limits.h>
 
 #include "common.h"
 #include "opts.h"
@@ -20,6 +22,8 @@
 #define ANSI_MAGENTA	"\x1b[35m"
 #define ANSI_CYAN	"\x1b[36m"
 #define ANSI_RESET	"\x1b[0m"
+
+static FILE *crashlog;
 
 static FILE *org_stdout;
 static FILE *org_stderr;
@@ -49,18 +53,44 @@ static void do_log(int priority, const char *data, size_t len)
 		}
 
 		if (color && isatty(fileno(fp)))
-			fprintf(fp, "%s%.*s%s", 
+			fprintf(fp, "%s%.*s%s",
 					color, (int)len, data, ANSI_RESET);
 		else
 			fprintf(fp, "%.*s", (int)len, data);
+
+		fflush(fp);
 	} else {
 		syslog(priority, "%.*s", (int)len, data);
 	}
+
+	if (priority == LOG_CRIT) {
+		if (!crashlog) {
+			char buf[1024];
+			char path[PATH_MAX];
+			time_t curr;
+
+			sprintf(path, "%s/bess_crash.log", P_tmpdir);
+			if (!(crashlog = fopen(path, "w")))
+				return;
+
+			time(&curr);
+			ctime_r(&curr, buf);
+			*strchr(buf, '\n') = '\0';
+			fprintf(crashlog, "Last crashlog generated at %s   "
+					"----------------------------\n", buf);
+		}
+
+		fprintf(crashlog, "%.*s", (int)len, data);
+		fflush(crashlog);
+	}
 }
 
-static void log_flush(int priority, struct logger *logger, int forced)
+static void do_flush(int priority, struct logger *logger, int forced)
 {
 	char *p;
+
+	if (logger->len == 0)
+		return;
 
 	p = logger->buf;
 	for (;;) {
@@ -68,14 +98,12 @@ static void log_flush(int priority, struct logger *logger, int forced)
 		if (!lf) {
 			/* forced or a long line without LF? */
 			if (forced || logger->len >= MAX_LOG_LEN) {
-				char tmp = p[MAX_LOG_LEN + 1];
+				int len = MIN(logger->len, MAX_LOG_LEN);
 
-				p[MAX_LOG_LEN + 1] = '\n';
-				do_log(priority, p, MAX_LOG_LEN + 1);
-				p[MAX_LOG_LEN + 1] = tmp;
+				do_log(priority, p, len);
 
-				p += MAX_LOG_LEN;
-				logger->len -= MAX_LOG_LEN;
+				p += len;
+				logger->len -= len;
 			}
 
 			break;
@@ -85,7 +113,7 @@ static void log_flush(int priority, struct logger *logger, int forced)
 		logger->len -= (lf - p + 1);
 		p = lf + 1;
 	}
-		
+
 	if (p != logger->buf && logger->len > 0)
 		memmove(logger->buf, p, logger->len);
 }
@@ -106,7 +134,7 @@ static void log_vfmt(int priority, const char *fmt, va_list ap)
 		size_t len;
 
 		len = sprintf(msg, "Too large log message: %d bytes\n",
-				to_write); 
+				to_write);
 		do_log(LOG_ERR, msg, len);
 
 		return;
@@ -115,7 +143,15 @@ static void log_vfmt(int priority, const char *fmt, va_list ap)
 	logger->len += to_write;
 
 	if (initialized || priority < LOG_DEBUG)
-		log_flush(priority, logger, 0);
+		do_flush(priority, logger, 0);
+}
+
+void log_flush(int priority)
+{
+	if (priority < 0 || priority > MAX_LOG_PRIORITY)
+		return;
+
+	do_flush(priority, &loggers[priority], 1);
 }
 
 void _log(int priority, const char *fmt, ...)
@@ -179,7 +215,7 @@ void start_logger()
 			dup2(fd, STDOUT_FILENO);
 			dup2(fd, STDERR_FILENO);
 
-			openlog(BESS_ID, LOG_PID | LOG_CONS | LOG_NDELAY, 
+			openlog(BESS_ID, LOG_PID | LOG_CONS | LOG_NDELAY,
 					LOG_DAEMON);
 
 			/* NOTE: although we replace stdout with our handler,
@@ -208,7 +244,7 @@ void end_logger()
 {
 	for (int i = 0; i <= MAX_LOG_PRIORITY; i++) {
 		if (i < LOG_DEBUG || global_opts.debug_mode)
-			log_flush(i, &loggers[i], 1);
+			do_flush(i, &loggers[i], 1);
 	}
 
 	if (!global_opts.foreground)
@@ -219,6 +255,11 @@ void end_logger()
 
 	fclose(stderr);
 	stderr = org_stderr;
+
+	if (crashlog) {
+		fclose(crashlog);
+		crashlog = NULL;
+	}
 
 	initialized = 0;
 }

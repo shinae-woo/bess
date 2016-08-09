@@ -111,15 +111,15 @@ static inline int is_be_system()
 
 /* src/dst addresses and their sizes must be a multiple of SIMD register size */
 static inline void
-memcpy_sloppy(void * restrict dst, const void * restrict src, size_t n)
+memcpy_sloppy(void *dst, const void *src, size_t n)
 {
 #if __AVX2__
 	typedef __m256i block_t;
 #else
 	typedef __m128i block_t;
 #endif
-	block_t * restrict d = dst;
-	const block_t * restrict s = src;
+	block_t *d = (block_t *) dst;
+	const block_t *s = (block_t *) src;
 
 	int bytes_left = n;
 	while (bytes_left > 0) {

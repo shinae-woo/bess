@@ -209,9 +209,7 @@ def build_bess():
     cmd('bin/bessctl daemon stop 2> /dev/null || true')
     cmd('rm -f core/bessd')     # force relink as DPDK might have been rebuilt
     cmd('make -C core')
-    cmd('ln -f -s $(pwd)/core/bessd ./bin/bessd')
-    cmd('ln -f -s $(pwd)/core/bessd /bin/bessd')
-    cmd('ln -f -s $(pwd)/bin/bessctl /bin/bessctl')
+    cmd('ln -f -s $(pwd)/core/bessd bin/bessd')
 
 def build_kmod():
     check_essential()

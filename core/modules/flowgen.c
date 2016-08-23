@@ -47,9 +47,13 @@ struct flowgen_priv {
 	double total_pps;
 	double flow_rate;		/* in flows/s */
 	double flow_duration;		/* in seconds */
+	int scale_factor; 		/* how many times it can scale-out from the 
+							   initial number of concurrent flows 
+							   (flow_rate * flow_duration) */
 
 	/* derived variables */
 	double concurrent_flows;	/* expected # of flows */
+	double max_concurrent_flows;	/* expected # of maximum flows */
 	double flow_pps;		/* packets/s/flow */
 	double flow_pkts;		/* flow_pps * flow_duration */
 	double flow_gap_ns;		/* == 10^9 / flow_rate */
@@ -254,6 +258,12 @@ process_arguments(struct flowgen_priv *priv, struct snobj *arg)
 			return snobj_err(EINVAL, "'duration' must be either "
 					"'uniform' or 'pareto'");
 	}
+	
+	if ((t = snobj_eval(arg, "scale_factor")) != NULL) {
+		priv->scale_factor = snobj_number_get(t);
+		if (priv->scale_factor < 1)
+			return snobj_err(EINVAL, "invalid 'scale_factor'");
+	}
 
 	if (snobj_eval_int(arg, "quick_rampup"))
 		priv->quick_rampup = 1;
@@ -265,7 +275,8 @@ static struct snobj *
 init_flow_pool(struct flowgen_priv *priv)
 {
 	/* allocate 20% more in case of temporal overflow */
-	priv->allocated_flows = (int)(priv->concurrent_flows * 1.2);
+	priv->allocated_flows = 
+		(int) (priv->concurrent_flows * priv->scale_factor * 1.2);
 	if (priv->allocated_flows < 128)
 		priv->allocated_flows = 128;
 
@@ -284,6 +295,42 @@ init_flow_pool(struct flowgen_priv *priv)
 	return NULL;
 }
 
+static struct snobj *
+flowgen_set_parameters(struct module *m, const char *cmd, struct snobj *arg)
+{
+	struct snobj *t;
+	
+	struct flowgen_priv *priv = get_priv(m);
+
+	if ((t = snobj_eval(arg, "pps")) != NULL) {
+		priv->total_pps = snobj_number_get(t);
+		if (isnan(priv->total_pps) || priv->total_pps < 0.0)
+			return snobj_err(EINVAL, "invalid 'pps'");
+	}
+
+	if ((t = snobj_eval(arg, "flow_rate")) != NULL) {
+		priv->flow_rate = snobj_number_get(t);
+		if (isnan(priv->flow_rate) || priv->flow_rate < 0.0)
+			return snobj_err(EINVAL, "invalid 'flow_rate'");
+	}
+
+	/* calculate derived variables */
+	priv->pareto.inversed_alpha = 1.0 / priv->pareto.alpha;
+
+	if (priv->duration == duration_pareto)
+		measure_pareto_mean(priv);
+
+	priv->concurrent_flows = priv->flow_rate * priv->flow_duration;
+	if (priv->concurrent_flows > 0.0)
+		priv->flow_pps = priv->total_pps / priv->concurrent_flows;
+
+	priv->flow_pkts = priv->flow_pps * priv->flow_duration;
+	if (priv->flow_rate > 0.0)
+		priv->flow_gap_ns = 1e9 / priv->flow_rate;
+	
+	return NULL;
+}
+
 static struct snobj *flowgen_init(struct module *m, struct snobj *arg)
 {
 	struct flowgen_priv *priv = get_priv(m);
@@ -297,6 +344,7 @@ static struct snobj *flowgen_init(struct module *m, struct snobj *arg)
 	priv->total_pps = 1000.0;
 	priv->flow_rate = 10.0;
 	priv->flow_duration = 10.0;
+	priv->scale_factor = 2;
 	priv->arrival = arrival_uniform;
 	priv->duration = duration_uniform;
 	priv->pareto.alpha = 1.3;
@@ -545,6 +593,9 @@ static const struct mclass flowgen = {
 	.run_task 	= flowgen_run_task,
 	.get_desc	= flowgen_get_desc,
 	.get_dump	= flowgen_get_dump,
+	.commands = {
+		{"set_parameters", flowgen_set_parameters},
+	}
 };
 
 ADD_MCLASS(flowgen)

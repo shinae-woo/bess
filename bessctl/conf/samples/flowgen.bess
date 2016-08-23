@@ -1,4 +1,5 @@
 import scapy.all as scapy
+import time
 
 # 'show module' command shows detailed stats/parameters
 
@@ -15,5 +16,69 @@ pkt_data = bytearray(str(pkt))
 # NOTE: without quick_rampup=1, it takes a while to converge to
 # the desied load level, especially when flow duration is pareto distribution
 
-FlowGen(template=pkt_data, pps=1e6, flow_rate = 1e4, flow_duration = 10.0, \
-        arrival='exponential', duration='pareto', quick_rampup=1) -> Sink()
+_init_pps = 1e6
+_init_flow_rate = 1e3
+_init_flow_duration = 10.0
+max_scale_out = 4
+
+bess.pause_all()
+
+print 'Init flow generator'
+print '\tpps: %d' % _init_pps
+print '\tflow_rate: %d' % _init_flow_rate
+print '\tflow_duration: %d' % _init_flow_duration
+
+flowgen::FlowGen(template = pkt_data, \
+        pps = _init_pps, flow_rate = _init_flow_rate, \
+        flow_duration = _init_flow_duration, scale_factor = max_scale_out, \
+        arrival = 'exponential', duration = 'pareto', quick_rampup = 1) \
+        -> Sink()
+bess.resume_all()
+
+loop_cnt = 1
+
+# scaling out
+while True:
+	time.sleep(30)
+
+	loop_cnt = loop_cnt + 1
+	if loop_cnt > max_scale_out:
+		break
+        
+        _target_pps = _init_pps * loop_cnt 
+	_target_flow_rate = _init_flow_rate * loop_cnt 
+	
+	_pps = _target_pps + (_init_pps * 0.1)
+	_flow_rate = _target_flow_rate + (_init_flow_rate * 0.1)
+        
+        print '--------- %d ---------' % loop_cnt
+        print '\tpps: %d (set %d)' % (_target_pps, _pps)
+        print '\tflow_rate: %d (st %d)' % (_target_flow_rate, _flow_rate)
+
+        bess.pause_all()
+	flowgen.set_parameters(pps = _pps, flow_rate = _flow_rate)
+	bess.resume_all()
+
+loop_cnt = max_scale_out
+
+# scaling in
+while True:
+	time.sleep(30)
+
+	loop_cnt = loop_cnt - 1
+	if loop_cnt < 1:
+		break
+	
+        _target_pps = _init_pps * loop_cnt 
+	_target_flow_rate = _init_flow_rate * loop_cnt 
+	
+	_pps = _target_pps - (_init_pps * 0.4)
+	_flow_rate = _target_flow_rate - (_init_flow_rate * 0.4)
+        
+        print '--------- %d ---------' % loop_cnt
+        print '\tpps: %d (set %d)' % (_target_pps, _pps)
+        print '\tflow_rate: %d (st %d)' % (_target_flow_rate, _flow_rate)
+
+        bess.pause_all()
+	flowgen.set_parameters(pps = _pps, flow_rate = _flow_rate)
+	bess.resume_all()

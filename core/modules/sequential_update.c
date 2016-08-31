@@ -134,22 +134,22 @@ static void supdate_process_batch(struct module *m, struct pkt_batch *batch)
 		uint32_t min = var->min;
 		uint32_t range = var->range;
 		int16_t offset = var->offset;
-		uint32_t idx = var->idx;
 			
 		for (int j = 0; j < cnt; j++) {
 			struct snbuf *snb = batch->pkts[j];
 			char *head = snb_head_data(snb);
 
 			uint32_t * restrict p;
-			uint32_t updated_val = idx;
+			uint32_t updated_val = var->idx;
+			
+			var->idx++;
+			if (var->idx == range)
+				var->idx = 0;
 
 			p = (uint32_t *)(head + offset);
 			*p = (*p & mask) | rte_cpu_to_be_32(min + updated_val);
 		}
 		
-		var->idx++;
-		if (var->idx == range)
-			var->idx = 0;
 	}
 
 	run_next_module(m, batch);

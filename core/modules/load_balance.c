@@ -150,6 +150,12 @@ load_balance_pkt(uint32_t ngates, uint32_t offset, uint32_t size,
 		struct snbuf *snb) 
 {
 	char *head = snb_head_data(snb);
+	
+	uint32_t hash = 0;
+	for (int i = 0; i < size; ++i) {
+		hash += *(uint8_t *)(head + offset + i);
+	}
+#if 0
 	uint32_t hash = 0;
 	for (int i = 0; i < size; ++i) {
 		hash += *(uint8_t *)(head + offset + i);
@@ -160,7 +166,7 @@ load_balance_pkt(uint32_t ngates, uint32_t offset, uint32_t size,
 	hash += (hash << 3);
 	hash ^= (hash >> 11);
 	hash += (hash << 15);
-
+#endif
 	return hash % ngates;
 }
 

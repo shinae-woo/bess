@@ -10,7 +10,8 @@
 /* XXX: currently doesn't support multiple workers */
 struct measure_priv {
 	struct histogram curr;
-	struct histogram not_in_local;
+	struct histogram migrated;
+	struct histogram remote_new;
 	struct histogram snapshots[MAX_SNAPSHOTS];
 
 	uint64_t start_time;
@@ -33,7 +34,11 @@ static struct snobj *measure_init(struct module *m, struct snobj *arg)
 	if (ret < 0)
 		return snobj_errno(-ret);
 	
-	ret = init_hist(&priv->not_in_local);
+	ret = init_hist(&priv->migrated);
+	if (ret < 0)
+		return snobj_errno(-ret);
+
+	ret = init_hist(&priv->remote_new);
 	if (ret < 0)
 		return snobj_errno(-ret);
 
@@ -45,7 +50,8 @@ static void measure_deinit(struct module *m)
 	struct measure_priv *priv = get_priv(m);
 
 	deinit_hist(&priv->curr);
-	deinit_hist(&priv->not_in_local);
+	deinit_hist(&priv->migrated);
+	deinit_hist(&priv->remote_new);
 	
 	for (int i = 0; i < MAX_SNAPSHOTS; i++)
 		if (priv->snapshots[i].arr == NULL)
@@ -62,12 +68,14 @@ command_measure_latency_clear(struct module *m, const char *cmd,
 {
 	struct measure_priv *priv = get_priv(m);
 	clear_hist(&priv->curr);
-	clear_hist(&priv->not_in_local);
+	clear_hist(&priv->migrated);
+	clear_hist(&priv->remote_new);
 
 	return NULL;
 }
 
-static inline int get_measure_packet(struct snbuf* pkt, uint64_t* time, uint8_t* in_local)
+static inline int get_measure_packet(struct snbuf* pkt, uint64_t* time, 
+		uint8_t *mark)
 {
 	uint8_t *avail = (uint8_t*)((uint8_t*)snb_head_data(pkt) +
 			sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr)) +
@@ -76,7 +84,7 @@ static inline int get_measure_packet(struct snbuf* pkt, uint64_t* time, uint8_t*
 	uint8_t available = *avail;
 	*time = *ts;
 			
-	*in_local = *(uint8_t *)(ts + 1);
+	*mark = *(uint8_t *)(ts + 1);
 	
 	//printf("%d %lu %d\n", available, *ts,  *in_local);
 	
@@ -99,8 +107,8 @@ static void measure_process_batch(struct module *m, struct pkt_batch *batch)
 
 	for (int i = 0; i < batch->cnt; i++) {
 		uint64_t pkt_time;
-		uint8_t in_local;
-		if (get_measure_packet(batch->pkts[i], &pkt_time, &in_local)) {
+		uint8_t mark;
+		if (get_measure_packet(batch->pkts[i], &pkt_time, &mark)) { 
 			uint64_t diff;
 			
 			if (time >= pkt_time)
@@ -113,10 +121,10 @@ static void measure_process_batch(struct module *m, struct pkt_batch *batch)
 				
 			record_latency(&priv->curr, diff);
 
-			if (in_local == 0) {
-				//printf("%lu\n", diff);
-				record_latency(&priv->not_in_local, diff);
-			}
+			if (mark & 0x01 /* migrated */)
+				record_latency(&priv->migrated, diff);
+			else if(mark & 0x02 /* remote_new */)	
+				record_latency(&priv->remote_new, diff);
 		}
 	}
 
@@ -211,9 +219,21 @@ command_get_ptile(struct module *m, const char *cmd, struct snobj *arg)
 
 	return out;
 }
+		
+struct snobj * 
+command_clean_migrated_ptile(struct module *m, const char *cmd, 
+		struct snobj *arg)
+{
+	struct measure_priv *priv = get_priv(m);
+	
+	clear_hist(&priv->migrated);
+	
+	return NULL;
+}
 
 struct snobj *
-command_get_remote_ptile(struct module *m, const char *cmd, struct snobj *arg)
+command_get_migrated_ptile(struct module *m, const char *cmd, 
+		struct snobj *arg)
 {
 	struct measure_priv *priv = get_priv(m);
 
@@ -242,7 +262,7 @@ command_get_remote_ptile(struct module *m, const char *cmd, struct snobj *arg)
 			return snobj_err(EINVAL, "idx %d: must be 0 - 100", i);
 	}
 
-	get_ptile(&priv->not_in_local, list->size, in_arr, out_arr);
+	get_ptile(&priv->migrated, list->size, in_arr, out_arr);
 
 	struct snobj *out = snobj_list();
 	for (int i = 0; i < list->size; i++) 
@@ -250,6 +270,58 @@ command_get_remote_ptile(struct module *m, const char *cmd, struct snobj *arg)
 
 	return out;
 }
+
+struct snobj * 
+command_clean_remote_new_ptile(struct module *m, const char *cmd, 
+		struct snobj *arg)
+{
+	struct measure_priv *priv = get_priv(m);
+	
+	clear_hist(&priv->remote_new);
+
+	return NULL;
+}
+
+struct snobj *
+command_get_remote_new_ptile(struct module *m, const char *cmd, 
+		struct snobj *arg)
+{
+	struct measure_priv *priv = get_priv(m);
+
+	if (snobj_type(arg) != TYPE_MAP) 
+		return snobj_err(EINVAL, "argument must be a map");
+	
+	if (!snobj_eval_exists(arg, "plist"))
+		return snobj_err(EINVAL, "'plist' must be specified");
+
+	struct snobj *list= snobj_eval(arg, "plist");
+	if (snobj_type(list) != TYPE_LIST) 
+		return snobj_err(EINVAL, "'plist' must be a list");
+
+	double in_arr[list->size];
+	double out_arr[list->size];
+	for (int i = 0; i < list->size; i++) {
+		struct snobj *elem = snobj_list_get(list, i);
+		if (snobj_type(elem) == TYPE_INT)
+			in_arr[i] = snobj_int_get(elem);
+		else if (snobj_type(elem) == TYPE_DOUBLE)
+			in_arr[i] = snobj_double_get(elem);
+		else 
+			return snobj_err(EINVAL, "idx %d: not a number", i);
+
+		if (in_arr[i] < 0 || in_arr[i] > 100)
+			return snobj_err(EINVAL, "idx %d: must be 0 - 100", i);
+	}
+
+	get_ptile(&priv->remote_new, list->size, in_arr, out_arr);
+
+	struct snobj *out = snobj_list();
+	for (int i = 0; i < list->size; i++) 
+		snobj_list_add(out, snobj_double(out_arr[i]));
+
+	return out;
+}
+
 
 static const struct mclass measure = {
 	.name 		= "Measure",
@@ -266,7 +338,10 @@ static const struct mclass measure = {
 		{"measure_latency_clear", command_measure_latency_clear, .mt_safe=1},
 		{"save_snapshot", command_save_snapshot, .mt_safe=1},
 		{"get_ptile", command_get_ptile, .mt_safe=1},
-		{"get_remote_ptile", command_get_remote_ptile, .mt_safe=1}
+		{"clean_migrated_ptile", command_clean_migrated_ptile},
+		{"get_migrated_ptile", command_get_migrated_ptile, .mt_safe=1},
+		{"clean_remote_new_ptile", command_clean_remote_new_ptile},
+		{"get_remote_new_ptile", command_get_remote_new_ptile, .mt_safe=1}
 	}
 };
 

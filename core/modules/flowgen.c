@@ -56,6 +56,7 @@ struct flowgen_priv {
 	double total_pps;
 	double flow_rate;		/* in flows/s */
 	double flow_duration;		/* in seconds */
+	int burstness; 			/* burst generation of packets */
 	int scale_factor; 		/* how many times it can scale-out from the 
 							   initial number of concurrent flows 
 							   (flow_rate * flow_duration) */
@@ -409,6 +410,7 @@ static struct snobj *flowgen_init(struct module *m, struct snobj *arg)
 	priv->arrival = arrival_uniform;
 	priv->duration = duration_uniform;
 	priv->pareto.alpha = 1.3;
+	priv->burstness = 8;
 
 	/* register task */
 	tid = register_task(m, NULL);
@@ -500,6 +502,7 @@ generate_packets(struct flowgen_priv *priv, struct pkt_batch *batch)
 		uint64_t t;
 		struct flow *f;
 		struct snbuf *pkt;
+		int count = 0;
 
 		heap_peek_valdata(h, (int64_t *)&t, (void **)&f);
 		if (!f || now < t)
@@ -512,29 +515,35 @@ generate_packets(struct flowgen_priv *priv, struct pkt_batch *batch)
 			priv->active_flows--;
 			continue;
 		}
+	
+		while (count <= priv->burstness && !batch_full(batch)) {
+			pkt = fill_packet(priv, f);
 
-		pkt = fill_packet(priv, f);
+			if (f->first) {
+				uint64_t delay_ns = next_flow_arrival(priv);
+				struct flow *new_f;
 
-		if (f->first) {
-			uint64_t delay_ns = next_flow_arrival(priv);
-			struct flow *new_f;
+				new_f = schedule_flow(priv, t + delay_ns);
+				if (!new_f) {
+					/* temporarily out of free flow data. retry. */
+					heap_push(h, t + RETRY_NS, f);
+					continue;
+				}
 
-			new_f = schedule_flow(priv, t + delay_ns);
-			if (!new_f) {
-				/* temporarily out of free flow data. retry. */
-				heap_push(h, t + RETRY_NS, f);
-				continue;
+				f->first = 0;
 			}
 
-			f->first = 0;
+			count++;
+			f->packets_left--;
+
+			if (pkt)
+				batch_add(batch, pkt);
+			
+			if (f->packets_left <= 0)
+				break;
 		}
 
-		f->packets_left--;
-
-		heap_push(h, t + (uint64_t)(1e9 / priv->flow_pps), f);
-
-		if (pkt)
-			batch_add(batch, pkt);
+		heap_push(h, t + (uint64_t)(1e9 / priv->flow_pps) * count, f);
 	}
 }
 

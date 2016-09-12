@@ -9,14 +9,31 @@
 
 #define RETRY_NS		1000000ul	/* 1 ms */
 
+#define TCP_SYN	0x01
+#define TCP_SYNACK	0x02
+#define TCP_FIRST_PAYLOAD	0x04
+#define TCP_SERVER	0x08
+#define TCP_CLIENT	0x10
+
+static uint16_t tcp_service_ports[] = 
+	{20, 21, 22, 25, 53, 
+	80, 110, 111, 113, 115, 
+	119, 123, 143, 161, 162, 
+	389, 443, 445, 514, 554, 
+	631, 990, 992, 993, 995, 
+	1194, 2049, 3306, 6667};
+
 struct flow {
-	uint32_t flow_id;
+	uint32_t src_ip;
+	uint32_t dst_ip;
+	uint16_t src_port;
+	uint16_t dst_port;
 	int packets_left;
-	int first;
+	int state;
 	struct cdlist_item free;
 };
 
-struct flowgen_priv {
+struct flowgen_prads_priv {
 	int active_flows;
 	int allocated_flows;
 	uint64_t generated_flows;
@@ -83,7 +100,7 @@ scaled_pareto_variate(double inversed_alpha, double mean, double desired_mean,
 	return 1.0 + (x - 1.0) / (mean - 1.0) * (desired_mean - 1.0);
 }
 
-static inline double new_flow_pkts(struct flowgen_priv *priv)
+static inline double new_flow_pkts(struct flowgen_prads_priv *priv)
 {
 	switch (priv->duration) {
 	case duration_uniform:
@@ -97,7 +114,7 @@ static inline double new_flow_pkts(struct flowgen_priv *priv)
 	}
 }
 
-static inline double max_flow_pkts(const struct flowgen_priv *priv)
+static inline double max_flow_pkts(const struct flowgen_prads_priv *priv)
 {
 	switch (priv->duration) {
 	case duration_uniform:
@@ -111,7 +128,7 @@ static inline double max_flow_pkts(const struct flowgen_priv *priv)
 	}
 }
 
-static inline uint64_t next_flow_arrival(struct flowgen_priv *priv)
+static inline uint64_t next_flow_arrival(struct flowgen_prads_priv *priv)
 {
 	switch (priv->arrival) {
 	case arrival_uniform:
@@ -126,7 +143,7 @@ static inline uint64_t next_flow_arrival(struct flowgen_priv *priv)
 }
 
 static inline struct flow *
-schedule_flow(struct flowgen_priv *priv, uint64_t time_ns)
+schedule_flow(struct flowgen_prads_priv *priv, uint64_t time_ns)
 {
 	struct cdlist_item *item;
 	struct flow *f;
@@ -136,8 +153,17 @@ schedule_flow(struct flowgen_priv *priv, uint64_t time_ns)
 		return NULL;
 
 	f = container_of(item, struct flow, free);
-	f->first = 1;
-	f->flow_id = (uint32_t)rand_fast(&priv->rseed);
+	f->state = TCP_SYN;
+	
+	f->src_ip = (uint32_t)rand_fast(&priv->rseed);
+	f->dst_ip = (uint32_t)rand_fast(&priv->rseed);
+	
+	
+	int service_port_idx = (uint16_t)rand_fast(&priv->rseed) % 
+		(sizeof(tcp_service_ports) / sizeof(uint16_t));
+
+	f->src_port = (uint16_t)rand_fast(&priv->rseed);
+	f->dst_port = htons(tcp_service_ports[service_port_idx]);
 
 	/* compensate the fraction part by adding [0.0, 1.0) */
 	f->packets_left = new_flow_pkts(priv) + rand_fast_real(&priv->rseed);;
@@ -150,7 +176,7 @@ schedule_flow(struct flowgen_priv *priv, uint64_t time_ns)
 	return f;
 }
 
-static void measure_pareto_mean(struct flowgen_priv *priv)
+static void measure_pareto_mean(struct flowgen_prads_priv *priv)
 {
 	const int iteration = 1000000;
 	double total = 0.0;
@@ -164,7 +190,7 @@ static void measure_pareto_mean(struct flowgen_priv *priv)
 	priv->pareto.mean = total / (iteration + 1);
 }
 
-static void populate_initial_flows(struct flowgen_priv *priv)
+static void populate_initial_flows(struct flowgen_prads_priv *priv)
 {
 	/* cannot use ctx.current_ns in the master thread... */
 	uint64_t now_ns = rdtsc() / tsc_hz * 1e9;
@@ -196,14 +222,14 @@ static void populate_initial_flows(struct flowgen_priv *priv)
 				break;
 
 			/* overwrite with a emulated pre-existing flow */
-			f->first = 0;
+			f->state = TCP_SERVER;
 			f->packets_left = flow_pkts - pre_consumed_pkts;
 		}
 	}
 }
 
 static struct snobj *
-process_arguments(struct flowgen_priv *priv, struct snobj *arg)
+process_arguments(struct flowgen_prads_priv *priv, struct snobj *arg)
 {
 	struct snobj *t;
 
@@ -272,7 +298,7 @@ process_arguments(struct flowgen_priv *priv, struct snobj *arg)
 }
 
 static struct snobj *
-init_flow_pool(struct flowgen_priv *priv)
+init_flow_pool(struct flowgen_prads_priv *priv)
 {
 	/* allocate 20% more in case of temporal overflow */
 	priv->allocated_flows = 
@@ -300,7 +326,7 @@ flowgen_set_parameters(struct module *m, const char *cmd, struct snobj *arg)
 {
 	struct snobj *t;
 	
-	struct flowgen_priv *priv = get_priv(m);
+	struct flowgen_prads_priv *priv = get_priv(m);
 
 	if ((t = snobj_eval(arg, "pps")) != NULL) {
 		priv->total_pps = snobj_number_get(t);
@@ -333,7 +359,7 @@ flowgen_set_parameters(struct module *m, const char *cmd, struct snobj *arg)
 
 static struct snobj *flowgen_init(struct module *m, struct snobj *arg)
 {
-	struct flowgen_priv *priv = get_priv(m);
+	struct flowgen_prads_priv *priv = get_priv(m);
 
 	task_id_t tid;
 	struct snobj *err;
@@ -388,13 +414,13 @@ static struct snobj *flowgen_init(struct module *m, struct snobj *arg)
 
 static void flowgen_deinit(struct module *m)
 {
-	struct flowgen_priv *priv = get_priv(m);
+	struct flowgen_prads_priv *priv = get_priv(m);
 
 	mem_free(priv->flows);
 	heap_close(&priv->events);
 }
 
-static struct snbuf *fill_packet(struct flowgen_priv *priv, struct flow *f)
+static struct snbuf *fill_packet(struct flowgen_prads_priv *priv, struct flow *f)
 {
 	struct snbuf *pkt;
 	char *p;
@@ -414,19 +440,34 @@ static struct snbuf *fill_packet(struct flowgen_priv *priv, struct flow *f)
 
 	memcpy_sloppy(p, priv->template, size);
 
-	tcp_flags = f->first ? /* SYN */ 0x02 : /* ACK */ 0x10;
+	tcp_flags = 0;	
+	if (f->state & TCP_SYN || f->state & TCP_SYNACK)
+		tcp_flags |= 0x02;	/* SYN */
+
+	if (!(f->state & TCP_SYN))
+		tcp_flags |= 0x10;	/* ACK */
 
 	if (f->packets_left <= 1)
 		tcp_flags |= 0x01;		/* FIN */
-
-	*(uint32_t *)(p + 14 + /* IP dst */ 16) = f->flow_id;
-	*(uint8_t *)(p + 14 + /* IP */ 20 + /* TCP flags */ 13) = tcp_flags;
-
+	
+	if (f->state & TCP_SYN || f->state & TCP_CLIENT) {
+		*(uint32_t *)(p + 14 + /* IP src */ 12) = f->src_ip;
+		*(uint32_t *)(p + 14 + /* IP dst */ 16) = f->dst_ip;
+		*(uint16_t *)(p + 14 + /* IP */ 20 + /* TCP src port */ 0) = f->src_port;
+		*(uint16_t *)(p + 14 + /* IP */ 20 + /* TCP dst port */ 2) = f->dst_port;
+		*(uint8_t *)(p + 14 + /* IP */ 20 + /* TCP flags */ 13) = tcp_flags;
+	} else {
+		*(uint32_t *)(p + 14 + /* IP dst */ 12) = f->dst_ip;
+		*(uint32_t *)(p + 14 + /* IP dst */ 16) = f->src_ip;
+		*(uint16_t *)(p + 14 + /* IP */ 20 + /* TCP src port */ 0) = f->dst_port;
+		*(uint16_t *)(p + 14 + /* IP */ 20 + /* TCP dst port */ 2) = f->src_port;
+		*(uint8_t *)(p + 14 + /* IP */ 20 + /* TCP flags */ 13) = tcp_flags;
+	}
 	return pkt;
 }
 
 static void
-generate_packets(struct flowgen_priv *priv, struct pkt_batch *batch)
+generate_packets(struct flowgen_prads_priv *priv, struct pkt_batch *batch)
 {
 	uint64_t now = ctx.current_ns;
 
@@ -453,7 +494,7 @@ generate_packets(struct flowgen_priv *priv, struct pkt_batch *batch)
 
 		pkt = fill_packet(priv, f);
 
-		if (f->first) {
+		if (f->state & TCP_SYN) {
 			uint64_t delay_ns = next_flow_arrival(priv);
 			struct flow *new_f;
 
@@ -464,7 +505,14 @@ generate_packets(struct flowgen_priv *priv, struct pkt_batch *batch)
 				continue;
 			}
 
-			f->first = 0;
+			f->state = TCP_SYNACK;
+		} else if (f->state & TCP_SYNACK) {
+			f->state = TCP_CLIENT;
+		} else {
+			if (f->state & TCP_SERVER)
+				f->state = TCP_CLIENT;
+			else
+				f->state = TCP_SERVER;
 		}
 
 		f->packets_left--;
@@ -479,7 +527,7 @@ generate_packets(struct flowgen_priv *priv, struct pkt_batch *batch)
 static struct task_result
 flowgen_run_task(struct module *m, void *arg)
 {
-	struct flowgen_priv *priv = get_priv(m);
+	struct flowgen_prads_priv *priv = get_priv(m);
 
 	struct pkt_batch batch;
 	struct task_result ret;
@@ -500,14 +548,14 @@ flowgen_run_task(struct module *m, void *arg)
 
 static struct snobj *flowgen_get_desc(const struct module *m)
 {
-	const struct flowgen_priv *priv = get_priv_const(m);
+	const struct flowgen_prads_priv *priv = get_priv_const(m);
 
 	return snobj_str_fmt("%d flows", priv->active_flows);
 }
 
 static struct snobj *flowgen_get_dump(const struct module *m)
 {
-	const struct flowgen_priv *priv = get_priv_const(m);
+	const struct flowgen_prads_priv *priv = get_priv_const(m);
 
 	struct snobj *r = snobj_map();
 
@@ -582,12 +630,12 @@ static struct snobj *flowgen_get_dump(const struct module *m)
 	return r;
 }
 
-static const struct mclass flowgen = {
-	.name 		= "FlowGen",
+static const struct mclass flowgen_prads = {
+	.name 		= "FlowGenPrads",
 	.help		= "generates packets on a flow basis",
 	.num_igates	= 0,
 	.num_ogates	= 1,
-	.priv_size	= sizeof(struct flowgen_priv),
+	.priv_size	= sizeof(struct flowgen_prads_priv),
 	.init 		= flowgen_init,
 	.deinit 	= flowgen_deinit,
 	.run_task 	= flowgen_run_task,
@@ -598,4 +646,4 @@ static const struct mclass flowgen = {
 	}
 };
 
-ADD_MCLASS(flowgen)
+ADD_MCLASS(flowgen_prads)

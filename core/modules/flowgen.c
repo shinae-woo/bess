@@ -9,8 +9,15 @@
 
 #define RETRY_NS		1000000ul	/* 1 ms */
 
+struct ip_range {
+	uint32_t min;
+	uint32_t max;
+	uint32_t range; /* == max - min + 1 */
+};
+
 struct flow {
-	uint32_t flow_id;
+	uint32_t src_ip;
+	uint32_t dst_ip;
 	int packets_left;
 	int first;
 	struct cdlist_item free;
@@ -29,6 +36,8 @@ struct flowgen_priv {
 	int template_size;
 
 	uint64_t rseed;
+	struct ip_range src_ip_range;
+	struct ip_range dst_ip_range;
 
 	/* behavior parameters */
 	int quick_rampup;
@@ -137,8 +146,12 @@ schedule_flow(struct flowgen_priv *priv, uint64_t time_ns)
 
 	f = container_of(item, struct flow, free);
 	f->first = 1;
-	f->flow_id = (uint32_t)rand_fast(&priv->rseed);
-
+	
+	f->src_ip = priv->src_ip_range.min + 
+		(uint32_t)rand_fast_range(&priv->rseed, priv->src_ip_range.range);
+	f->dst_ip = priv->dst_ip_range.min + 
+		(uint32_t)rand_fast_range(&priv->rseed, priv->dst_ip_range.range);
+	
 	/* compensate the fraction part by adding [0.0, 1.0) */
 	f->packets_left = new_flow_pkts(priv) + rand_fast_real(&priv->rseed);;
 
@@ -220,6 +233,46 @@ process_arguments(struct flowgen_priv *priv, struct snobj *arg)
 
 	memset(priv->template, 0, MAX_TEMPLATE_SIZE);
 	memcpy(priv->template, snobj_blob_get(t), priv->template_size);
+	
+	if ((t = snobj_eval(arg, "src_ip_range")) != NULL) {
+		if (snobj_type(t) != TYPE_MAP) {
+			return snobj_err(EINVAL, "src_ip_range must be given as a map");
+		}
+
+		struct snobj *min = snobj_eval(t, "min");
+		struct snobj *max = snobj_eval(t, "max");
+		if (!min || !max)
+			return snobj_err(EINVAL, "'min', 'max' must be given");
+
+		priv->src_ip_range.min = snobj_uint_get(min);
+		priv->src_ip_range.max = snobj_uint_get(max);
+		if (priv->src_ip_range.max < priv->src_ip_range.min) 
+			return snobj_err(EINVAL, "invalid 'src_ip_range'. "
+					"'max' must not be smaller than 'min'");
+		
+		priv->src_ip_range.range = 
+			priv->src_ip_range.max - priv->src_ip_range.min;
+	}
+	
+	if ((t = snobj_eval(arg, "dst_ip_range")) != NULL) {
+		if (snobj_type(t) != TYPE_MAP) {
+			return snobj_err(EINVAL, "src_ip_range must be given as a map");
+		}
+
+		struct snobj *min = snobj_eval(t, "min");
+		struct snobj *max = snobj_eval(t, "max");
+		if (!min || !max)
+			return snobj_err(EINVAL, "'min', 'max' must be given");
+	
+		priv->dst_ip_range.min = snobj_uint_get(min);
+		priv->dst_ip_range.max = snobj_uint_get(max);
+		if (priv->dst_ip_range.max < priv->dst_ip_range.min) 
+			return snobj_err(EINVAL, "invalid 'dst_ip_range'. "
+					"'max' must not be smaller than 'min'");
+		
+		priv->dst_ip_range.range = 
+			priv->dst_ip_range.max - priv->dst_ip_range.min;
+	}
 
 	if ((t = snobj_eval(arg, "pps")) != NULL) {
 		priv->total_pps = snobj_number_get(t);
@@ -340,6 +393,14 @@ static struct snobj *flowgen_init(struct module *m, struct snobj *arg)
 
 	priv->rseed = 0xBAADF00DDEADBEEFul;
 
+	priv->src_ip_range.min = 0;
+	priv->src_ip_range.max = UINT32_MAX;
+	priv->src_ip_range.range = UINT32_MAX;
+	
+	priv->dst_ip_range.min = 0;
+	priv->dst_ip_range.max = UINT32_MAX;
+	priv->dst_ip_range.range = UINT32_MAX;
+
 	/* set default parameters */
 	priv->total_pps = 1000.0;
 	priv->flow_rate = 10.0;
@@ -419,7 +480,8 @@ static struct snbuf *fill_packet(struct flowgen_priv *priv, struct flow *f)
 	if (f->packets_left <= 1)
 		tcp_flags |= 0x01;		/* FIN */
 
-	*(uint32_t *)(p + 14 + /* IP dst */ 16) = f->flow_id;
+	*(uint32_t *)(p + 14 + /* IP src */ 12) = f->src_ip;
+	*(uint32_t *)(p + 14 + /* IP dst */ 16) = f->dst_ip;
 	*(uint8_t *)(p + 14 + /* IP */ 20 + /* TCP flags */ 13) = tcp_flags;
 
 	return pkt;
@@ -536,6 +598,25 @@ static struct snobj *flowgen_get_dump(const struct module *m)
 
 		snobj_map_set(r, "load", t);
 	}
+	
+	{
+		struct snobj *t = snobj_map();
+
+		snobj_map_set(t, "src_ip_min",
+				snobj_uint(priv->src_ip_range.min));
+		snobj_map_set(t, "src_ip_max",
+				snobj_uint(priv->src_ip_range.max));
+		snobj_map_set(t, "src_ip_range",
+				snobj_uint(priv->src_ip_range.range));
+		snobj_map_set(t, "dst_ip_min",
+				snobj_uint(priv->dst_ip_range.min));
+		snobj_map_set(t, "dst_ip_max",
+				snobj_uint(priv->dst_ip_range.max));
+		snobj_map_set(t, "dst_ip_range",
+				snobj_uint(priv->dst_ip_range.range));
+
+		snobj_map_set(r, "flow address pool", t);
+	}
 
 	{
 		struct snobj *t = snobj_map();
@@ -551,7 +632,7 @@ static struct snobj *flowgen_get_dump(const struct module *m)
 
 		snobj_map_set(r, "derived", t);
 	}
-
+	
 	{
 		struct snobj *t = snobj_map();
 

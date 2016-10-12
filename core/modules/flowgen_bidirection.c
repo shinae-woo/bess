@@ -23,6 +23,12 @@ static uint16_t tcp_service_ports[] =
 	631, 990, 992, 993, 995, 
 	1194, 2049, 3306, 6667};
 
+struct ip_range {
+	uint32_t min;
+	uint32_t max;
+	uint32_t range; /* == max - min + 1 */
+};
+
 struct flow {
 	uint32_t src_ip;
 	uint32_t dst_ip;
@@ -33,7 +39,7 @@ struct flow {
 	struct cdlist_item free;
 };
 
-struct flowgen_prads_priv {
+struct flowgen_bidirection_priv {
 	int active_flows;
 	int allocated_flows;
 	uint64_t generated_flows;
@@ -46,6 +52,8 @@ struct flowgen_prads_priv {
 	int template_size;
 
 	uint64_t rseed;
+	struct ip_range src_ip_range;
+	struct ip_range dst_ip_range;
 
 	/* behavior parameters */
 	int quick_rampup;
@@ -100,7 +108,7 @@ scaled_pareto_variate(double inversed_alpha, double mean, double desired_mean,
 	return 1.0 + (x - 1.0) / (mean - 1.0) * (desired_mean - 1.0);
 }
 
-static inline double new_flow_pkts(struct flowgen_prads_priv *priv)
+static inline double new_flow_pkts(struct flowgen_bidirection_priv *priv)
 {
 	switch (priv->duration) {
 	case duration_uniform:
@@ -114,7 +122,7 @@ static inline double new_flow_pkts(struct flowgen_prads_priv *priv)
 	}
 }
 
-static inline double max_flow_pkts(const struct flowgen_prads_priv *priv)
+static inline double max_flow_pkts(const struct flowgen_bidirection_priv *priv)
 {
 	switch (priv->duration) {
 	case duration_uniform:
@@ -128,7 +136,7 @@ static inline double max_flow_pkts(const struct flowgen_prads_priv *priv)
 	}
 }
 
-static inline uint64_t next_flow_arrival(struct flowgen_prads_priv *priv)
+static inline uint64_t next_flow_arrival(struct flowgen_bidirection_priv *priv)
 {
 	switch (priv->arrival) {
 	case arrival_uniform:
@@ -143,7 +151,7 @@ static inline uint64_t next_flow_arrival(struct flowgen_prads_priv *priv)
 }
 
 static inline struct flow *
-schedule_flow(struct flowgen_prads_priv *priv, uint64_t time_ns)
+schedule_flow(struct flowgen_bidirection_priv *priv, uint64_t time_ns)
 {
 	struct cdlist_item *item;
 	struct flow *f;
@@ -154,11 +162,12 @@ schedule_flow(struct flowgen_prads_priv *priv, uint64_t time_ns)
 
 	f = container_of(item, struct flow, free);
 	f->state = TCP_SYN;
-	
-	f->src_ip = (uint32_t)rand_fast(&priv->rseed);
-	f->dst_ip = (uint32_t)rand_fast(&priv->rseed);
-	
-	
+
+	f->src_ip = priv->src_ip_range.min + 
+		(uint32_t)rand_fast_range(&priv->rseed, priv->src_ip_range.range);
+	f->dst_ip = priv->dst_ip_range.min + 
+		(uint32_t)rand_fast_range(&priv->rseed, priv->dst_ip_range.range);
+
 	int service_port_idx = (uint16_t)rand_fast(&priv->rseed) % 
 		(sizeof(tcp_service_ports) / sizeof(uint16_t));
 
@@ -176,7 +185,7 @@ schedule_flow(struct flowgen_prads_priv *priv, uint64_t time_ns)
 	return f;
 }
 
-static void measure_pareto_mean(struct flowgen_prads_priv *priv)
+static void measure_pareto_mean(struct flowgen_bidirection_priv *priv)
 {
 	const int iteration = 1000000;
 	double total = 0.0;
@@ -190,7 +199,7 @@ static void measure_pareto_mean(struct flowgen_prads_priv *priv)
 	priv->pareto.mean = total / (iteration + 1);
 }
 
-static void populate_initial_flows(struct flowgen_prads_priv *priv)
+static void populate_initial_flows(struct flowgen_bidirection_priv *priv)
 {
 	/* cannot use ctx.current_ns in the master thread... */
 	uint64_t now_ns = rdtsc() / tsc_hz * 1e9;
@@ -229,7 +238,7 @@ static void populate_initial_flows(struct flowgen_prads_priv *priv)
 }
 
 static struct snobj *
-process_arguments(struct flowgen_prads_priv *priv, struct snobj *arg)
+process_arguments(struct flowgen_bidirection_priv *priv, struct snobj *arg)
 {
 	struct snobj *t;
 
@@ -246,6 +255,48 @@ process_arguments(struct flowgen_prads_priv *priv, struct snobj *arg)
 
 	memset(priv->template, 0, MAX_TEMPLATE_SIZE);
 	memcpy(priv->template, snobj_blob_get(t), priv->template_size);
+
+	if ((t = snobj_eval(arg, "src_ip_range")) != NULL) {
+		if (snobj_type(t) != TYPE_MAP) {
+			return snobj_err(EINVAL, "src_ip_range must be given as a map");
+		}
+
+		struct snobj *min = snobj_eval(t, "min");
+		struct snobj *max = snobj_eval(t, "max");
+		if (!min || !max)
+			return snobj_err(EINVAL, "'min', 'max' must be given");
+		
+		priv->src_ip_range.min = snobj_number_get(min);
+		priv->src_ip_range.max = snobj_number_get(max);
+
+		if (priv->src_ip_range.max < priv->src_ip_range.min) 
+			return snobj_err(EINVAL, "invalid 'src_ip_range'. "
+					"'max' must not be smaller than 'min'");
+		
+		priv->src_ip_range.range = 
+			priv->src_ip_range.max - priv->src_ip_range.min;
+	}
+	
+	if ((t = snobj_eval(arg, "dst_ip_range")) != NULL) {
+		if (snobj_type(t) != TYPE_MAP) {
+			return snobj_err(EINVAL, "src_ip_range must be given as a map");
+		}
+
+		struct snobj *min = snobj_eval(t, "min");
+		struct snobj *max = snobj_eval(t, "max");
+		if (!min || !max)
+			return snobj_err(EINVAL, "'min', 'max' must be given");
+
+		priv->dst_ip_range.min = snobj_number_get(min);
+		priv->dst_ip_range.max = snobj_number_get(max);
+
+		if (priv->dst_ip_range.max < priv->dst_ip_range.min) 
+			return snobj_err(EINVAL, "invalid 'dst_ip_range'. "
+					"'max' must not be smaller than 'min'");
+		
+		priv->dst_ip_range.range = 
+			priv->dst_ip_range.max - priv->dst_ip_range.min;
+	}
 
 	if ((t = snobj_eval(arg, "pps")) != NULL) {
 		priv->total_pps = snobj_number_get(t);
@@ -298,7 +349,7 @@ process_arguments(struct flowgen_prads_priv *priv, struct snobj *arg)
 }
 
 static struct snobj *
-init_flow_pool(struct flowgen_prads_priv *priv)
+init_flow_pool(struct flowgen_bidirection_priv *priv)
 {
 	/* allocate 20% more in case of temporal overflow */
 	priv->allocated_flows = 
@@ -326,7 +377,7 @@ flowgen_set_parameters(struct module *m, const char *cmd, struct snobj *arg)
 {
 	struct snobj *t;
 	
-	struct flowgen_prads_priv *priv = get_priv(m);
+	struct flowgen_bidirection_priv *priv = get_priv(m);
 
 	if ((t = snobj_eval(arg, "pps")) != NULL) {
 		priv->total_pps = snobj_number_get(t);
@@ -359,12 +410,20 @@ flowgen_set_parameters(struct module *m, const char *cmd, struct snobj *arg)
 
 static struct snobj *flowgen_init(struct module *m, struct snobj *arg)
 {
-	struct flowgen_prads_priv *priv = get_priv(m);
+	struct flowgen_bidirection_priv *priv = get_priv(m);
 
 	task_id_t tid;
 	struct snobj *err;
 
 	priv->rseed = 0xBAADF00DDEADBEEFul;
+
+	priv->src_ip_range.min = 0;
+	priv->src_ip_range.max = UINT32_MAX;
+	priv->src_ip_range.range = UINT32_MAX;
+	
+	priv->dst_ip_range.min = 0;
+	priv->dst_ip_range.max = UINT32_MAX;
+	priv->dst_ip_range.range = UINT32_MAX;
 
 	/* set default parameters */
 	priv->total_pps = 1000.0;
@@ -414,13 +473,13 @@ static struct snobj *flowgen_init(struct module *m, struct snobj *arg)
 
 static void flowgen_deinit(struct module *m)
 {
-	struct flowgen_prads_priv *priv = get_priv(m);
+	struct flowgen_bidirection_priv *priv = get_priv(m);
 
 	mem_free(priv->flows);
 	heap_close(&priv->events);
 }
 
-static struct snbuf *fill_packet(struct flowgen_prads_priv *priv, struct flow *f)
+static struct snbuf *fill_packet(struct flowgen_bidirection_priv *priv, struct flow *f)
 {
 	struct snbuf *pkt;
 	char *p;
@@ -467,7 +526,7 @@ static struct snbuf *fill_packet(struct flowgen_prads_priv *priv, struct flow *f
 }
 
 static void
-generate_packets(struct flowgen_prads_priv *priv, struct pkt_batch *batch)
+generate_packets(struct flowgen_bidirection_priv *priv, struct pkt_batch *batch)
 {
 	uint64_t now = ctx.current_ns;
 
@@ -527,7 +586,7 @@ generate_packets(struct flowgen_prads_priv *priv, struct pkt_batch *batch)
 static struct task_result
 flowgen_run_task(struct module *m, void *arg)
 {
-	struct flowgen_prads_priv *priv = get_priv(m);
+	struct flowgen_bidirection_priv *priv = get_priv(m);
 
 	struct pkt_batch batch;
 	struct task_result ret;
@@ -548,14 +607,14 @@ flowgen_run_task(struct module *m, void *arg)
 
 static struct snobj *flowgen_get_desc(const struct module *m)
 {
-	const struct flowgen_prads_priv *priv = get_priv_const(m);
+	const struct flowgen_bidirection_priv *priv = get_priv_const(m);
 
 	return snobj_str_fmt("%d flows", priv->active_flows);
 }
 
 static struct snobj *flowgen_get_dump(const struct module *m)
 {
-	const struct flowgen_prads_priv *priv = get_priv_const(m);
+	const struct flowgen_bidirection_priv *priv = get_priv_const(m);
 
 	struct snobj *r = snobj_map();
 
@@ -581,8 +640,29 @@ static struct snobj *flowgen_get_dump(const struct module *m)
 				snobj_double(priv->flow_rate));
 		snobj_map_set(t, "flow_duration",
 				snobj_double(priv->flow_duration));
+		snobj_map_set(t, "scale_factor",
+				snobj_int(priv->scale_factor));
 
 		snobj_map_set(r, "load", t);
+	}
+
+	{
+		struct snobj *t = snobj_map();
+
+		snobj_map_set(t, "src_ip_min",
+				snobj_uint(priv->src_ip_range.min));
+		snobj_map_set(t, "src_ip_max",
+				snobj_uint(priv->src_ip_range.max));
+		snobj_map_set(t, "src_ip_range",
+				snobj_uint(priv->src_ip_range.range));
+		snobj_map_set(t, "dst_ip_min",
+				snobj_uint(priv->dst_ip_range.min));
+		snobj_map_set(t, "dst_ip_max",
+				snobj_uint(priv->dst_ip_range.max));
+		snobj_map_set(t, "dst_ip_range",
+				snobj_uint(priv->dst_ip_range.range));
+
+		snobj_map_set(r, "flow address pool", t);
 	}
 
 	{
@@ -630,12 +710,12 @@ static struct snobj *flowgen_get_dump(const struct module *m)
 	return r;
 }
 
-static const struct mclass flowgen_prads = {
-	.name 		= "FlowGenPrads",
-	.help		= "generates packets on a flow basis",
+static const struct mclass flowgen_bidirection = {
+	.name 		= "FlowGenBidirection",
+	.help		= "generates packets on a bidirectional flow basis",
 	.num_igates	= 0,
 	.num_ogates	= 1,
-	.priv_size	= sizeof(struct flowgen_prads_priv),
+	.priv_size	= sizeof(struct flowgen_bidirection_priv),
 	.init 		= flowgen_init,
 	.deinit 	= flowgen_deinit,
 	.run_task 	= flowgen_run_task,
@@ -646,4 +726,4 @@ static const struct mclass flowgen_prads = {
 	}
 };
 
-ADD_MCLASS(flowgen_prads)
+ADD_MCLASS(flowgen_bidirection)

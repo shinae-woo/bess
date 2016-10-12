@@ -72,6 +72,7 @@ struct flowgen_bidirection_priv {
 	double total_pps;
 	double flow_rate;		/* in flows/s */
 	double flow_duration;		/* in seconds */
+	int burstness; 			/* burst generation of packets in a flow */
 	int scale_factor; 		/* how many times it can scale-out from the 
 							   initial number of concurrent flows 
 							   (flow_rate * flow_duration) */
@@ -433,6 +434,7 @@ static struct snobj *flowgen_init(struct module *m, struct snobj *arg)
 	priv->arrival = arrival_uniform;
 	priv->duration = duration_uniform;
 	priv->pareto.alpha = 1.3;
+	priv->burstness = 8;
 
 	/* register task */
 	tid = register_task(m, NULL);
@@ -538,6 +540,7 @@ generate_packets(struct flowgen_bidirection_priv *priv, struct pkt_batch *batch)
 		uint64_t t;
 		struct flow *f;
 		struct snbuf *pkt;
+		int count = 0;
 
 		heap_peek_valdata(h, (int64_t *)&t, (void **)&f);
 		if (!f || now < t)
@@ -551,35 +554,42 @@ generate_packets(struct flowgen_bidirection_priv *priv, struct pkt_batch *batch)
 			continue;
 		}
 
-		pkt = fill_packet(priv, f);
+		while (count <= priv->burstness && !batch_full(batch)) {
+			pkt = fill_packet(priv, f);
 
-		if (f->state & TCP_SYN) {
-			uint64_t delay_ns = next_flow_arrival(priv);
-			struct flow *new_f;
+			if (f->state & TCP_SYN) {
+				uint64_t delay_ns = next_flow_arrival(priv);
+				struct flow *new_f;
 
-			new_f = schedule_flow(priv, t + delay_ns);
-			if (!new_f) {
-				/* temporarily out of free flow data. retry. */
-				heap_push(h, t + RETRY_NS, f);
-				continue;
+				new_f = schedule_flow(priv, t + delay_ns);
+				if (!new_f) {
+					/* temporarily out of free flow data. retry. */
+					heap_push(h, t + RETRY_NS, f);
+					continue;
+				}
+
+				f->state = TCP_SYNACK;
+			} else if (f->state & TCP_SYNACK) {
+				f->state = TCP_CLIENT;
+			} else {
+				if (f->state & TCP_SERVER)
+					f->state = TCP_CLIENT;
+				else
+					f->state = TCP_SERVER;
 			}
 
-			f->state = TCP_SYNACK;
-		} else if (f->state & TCP_SYNACK) {
-			f->state = TCP_CLIENT;
-		} else {
-			if (f->state & TCP_SERVER)
-				f->state = TCP_CLIENT;
-			else
-				f->state = TCP_SERVER;
+			count++;
+			f->packets_left--;
+
+			if (pkt)
+				batch_add(batch, pkt);
+
+			if (f->packets_left <= 0)
+				break;
 		}
 
-		f->packets_left--;
+		heap_push(h, t + (uint64_t)(1e9 / priv->flow_pps) * count, f);
 
-		heap_push(h, t + (uint64_t)(1e9 / priv->flow_pps), f);
-
-		if (pkt)
-			batch_add(batch, pkt);
 	}
 }
 

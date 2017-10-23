@@ -212,8 +212,8 @@ class alignas(64) Module {
   // NOTE: this function will be called even if Init() has failed.
   virtual void DeInit();
 
-  virtual struct task_result RunTask(void *arg);
-  virtual void ProcessBatch(bess::PacketBatch *batch);
+  virtual struct task_result RunTask(const Task *task, void *arg);
+  virtual void ProcessBatch(const Task *task, bess::PacketBatch *batch);
 
   /*
    * If a derived Module overrides OnEvent and doesn't return  -ENOTSUP for a
@@ -246,10 +246,11 @@ class alignas(64) Module {
 
   /* Pass packets to the next module.
    * Packet deallocation is callee's responsibility. */
-  inline void RunChooseModule(gate_idx_t ogate_idx, bess::PacketBatch *batch);
+  inline void RunChooseModule(const Task *task, gate_idx_t ogate_idx,
+                              bess::PacketBatch *batch);
 
   /* Wrapper for single-output modules */
-  inline void RunNextModule(bess::PacketBatch *batch);
+  inline void RunNextModule(const Task *task, bess::PacketBatch *batch);
 
   /*
    * Split a batch into several, one for each ogate
@@ -257,7 +258,8 @@ class alignas(64) Module {
    *   1. Order is preserved for packets with the same gate.
    *   2. No ordering guarantee for packets with different gates.
    */
-  void RunSplit(const gate_idx_t *ogates, bess::PacketBatch *mixed_batch);
+  void RunSplit(const Task *task, const gate_idx_t *ogates,
+                bess::PacketBatch *mixed_batch);
 
   /* returns -errno if fails */
   int ConnectModules(gate_idx_t ogate_idx, Module *m_next,
@@ -449,9 +451,10 @@ class alignas(64) Module {
 static inline void deadend(bess::PacketBatch *batch) {
   ctx.incr_silent_drops(batch->cnt());
   bess::Packet::Free(batch);
+  delete batch;
 }
 
-inline void Module::RunChooseModule(gate_idx_t ogate_idx,
+inline void Module::RunChooseModule(const Task *task, gate_idx_t ogate_idx,
                                     bess::PacketBatch *batch) {
   bess::OGate *ogate;
 
@@ -474,16 +477,11 @@ inline void Module::RunChooseModule(gate_idx_t ogate_idx,
     hook->ProcessBatch(batch);
   }
 
-  for (auto &hook : ogate->igate()->hooks()) {
-    hook->ProcessBatch(batch);
-  }
-
-  ctx.set_current_igate(ogate->igate_idx());
-  (static_cast<Module *>(ogate->next()))->ProcessBatch(batch);
+  task->subtasks_.push(std::make_pair(ogate->igate(), batch));
 }
 
-inline void Module::RunNextModule(bess::PacketBatch *batch) {
-  RunChooseModule(0, batch);
+inline void Module::RunNextModule(const Task *task, bess::PacketBatch *batch) {
+  RunChooseModule(task, 0, batch);
 }
 
 /* run all per-thread initializers */

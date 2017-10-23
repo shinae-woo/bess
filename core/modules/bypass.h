@@ -42,7 +42,7 @@ class Bypass final : public Module {
   static const gate_idx_t kNumOGates = MAX_GATES;
 
   Bypass() { max_allowed_workers_ = Worker::kMaxWorkers; }
-  void ProcessBatch(bess::PacketBatch *batch) override;
+  void ProcessBatch(const Task *task, bess::PacketBatch *batch) override;
 };
 
 #endif  // BESS_MODULES_BYPASS_H_

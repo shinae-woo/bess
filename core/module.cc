@@ -142,12 +142,12 @@ CommandResponse Module::Init(const bess::pb::EmptyArg &) {
 
 void Module::DeInit() {}
 
-struct task_result Module::RunTask(void *) {
+struct task_result Module::RunTask(const Task *, void *) {
   CHECK(0);  // You must override this function
   return task_result();
 }
 
-void Module::ProcessBatch(bess::PacketBatch *) {
+void Module::ProcessBatch(const Task *, bess::PacketBatch *) {
   CHECK(0);  // You must override this function
 }
 
@@ -429,7 +429,7 @@ int Module::DisconnectModulesUpstream(gate_idx_t igate_idx) {
   return 0;
 }
 
-void Module::RunSplit(const gate_idx_t *out_gates,
+void Module::RunSplit(const Task *task, const gate_idx_t *out_gates,
                       bess::PacketBatch *mixed_batch) {
   int cnt = mixed_batch->cnt();
   int num_pending = 0;
@@ -437,7 +437,7 @@ void Module::RunSplit(const gate_idx_t *out_gates,
   bess::Packet **p_pkt = &mixed_batch->pkts()[0];
 
   gate_idx_t pending[bess::PacketBatch::kMaxBurst];
-  bess::PacketBatch batches[bess::PacketBatch::kMaxBurst];
+  bess::PacketBatch *batches[bess::PacketBatch::kMaxBurst];
 
   bess::PacketBatch **splits = ctx.splits();
 
@@ -451,7 +451,7 @@ void Module::RunSplit(const gate_idx_t *out_gates,
     ogate = out_gates[i];
     batch = splits[ogate];
     if (!batch) {
-      batch = splits[ogate] = &batches[num_pending];
+      batch = splits[ogate] = batches[num_pending] = new bess::PacketBatch();
       batch->clear();
       pending[num_pending] = ogate;
       num_pending++;
@@ -460,14 +460,17 @@ void Module::RunSplit(const gate_idx_t *out_gates,
     batch->add(*(p_pkt++));
   }
 
+  delete mixed_batch;
+
   // phase 2: clear splits, since it may be reentrant.
   for (int i = 0; i < num_pending; i++) {
     splits[pending[i]] = nullptr;
   }
 
   // phase 3: fire
-  for (int i = 0; i < num_pending; i++)
-    RunChooseModule(pending[i], &batches[i]);
+  for (int i = 0; i < num_pending; i++) {
+    RunChooseModule(task, pending[i], batches[i]);
+  }
 }
 
 #if SN_TRACE_MODULES

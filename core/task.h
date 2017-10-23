@@ -31,6 +31,7 @@
 #ifndef BESS_TASK_H_
 #define BESS_TASK_H_
 
+#include <queue>
 #include <string>
 
 struct task_result {
@@ -46,6 +47,8 @@ class Module;
 
 namespace bess {
 class LeafTrafficClass;
+class IGate;
+class PacketBatch;
 }  // namespace bess
 
 // Functor used by a leaf in a Worker's Scheduler to run a task in a module.
@@ -76,6 +79,9 @@ class Task {
   void AddActiveWorker(int wid) const;
 
   Module *module() const { return module_; }
+
+  mutable std::queue<std::pair<bess::IGate *, bess::PacketBatch *>>
+      subtasks_;  // Subtasks to run
 
  private:
   // Used by operator().

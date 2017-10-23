@@ -80,25 +80,22 @@ CommandResponse Source::CommandSetPktSize(
   return CommandSuccess();
 }
 
-struct task_result Source::RunTask(void *) {
+struct task_result Source::RunTask(const Task *task, void *) {
   if (children_overload_ > 0) {
     return {
-      .block = true,
-      .packets = 0,
-      .bits = 0,
+        .block = true, .packets = 0, .bits = 0,
     };
   }
 
-  bess::PacketBatch batch;
+  bess::PacketBatch *batch = new bess::PacketBatch();
 
   const int pkt_overhead = 24;
-
   const int pkt_size = ACCESS_ONCE(pkt_size_);
   const int burst = ACCESS_ONCE(burst_);
 
-  uint32_t cnt = bess::Packet::Alloc(batch.pkts(), burst, pkt_size);
-  batch.set_cnt(cnt);
-  RunNextModule(&batch);  // it's fine to call this function with cnt==0
+  uint32_t cnt = bess::Packet::Alloc(batch->pkts(), burst, pkt_size);
+  batch->set_cnt(cnt);
+  RunNextModule(task, batch);  // it's fine to call this function with cnt==0
 
   return {.block = (cnt == 0),
           .packets = cnt,

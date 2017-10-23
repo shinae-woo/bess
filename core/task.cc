@@ -32,6 +32,7 @@
 
 #include <unordered_set>
 
+#include "gate.h"
 #include "module.h"
 
 // Called when the leaf that owns this task is destroyed.
@@ -45,7 +46,35 @@ void Task::Attach(bess::LeafTrafficClass *c) {
 }
 
 struct task_result Task::operator()(void) const {
-  return module_->RunTask(arg_);
+  // Inital task
+  struct task_result result = module_->RunTask(this, arg_);
+
+  if (result.packets == 0) {
+    return result;
+  }
+
+  bess::PacketBatch *batch;
+  bess::IGate *igate;
+  Module *module;
+
+  while (!subtasks_.empty()) {
+    auto next = subtasks_.front();
+    subtasks_.pop();
+
+    batch = next.second;
+    igate = next.first;
+    module = igate->module();
+
+    // Process igate
+    for (auto &hook : igate->hooks()) {
+      hook->ProcessBatch(batch);
+    }
+
+    // Process module
+    module->ProcessBatch(this, batch);
+  }
+
+  return result;
 }
 
 /*!

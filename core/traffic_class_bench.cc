@@ -48,11 +48,11 @@ namespace {
 
 class DummyModule : public Module {
  public:
-  struct task_result RunTask(void *arg) override;
+  struct task_result RunTask(const Task *, void *arg) override;
 };
 
-[[gnu::noinline]] struct task_result DummyModule::RunTask([
-    [maybe_unused]] void *arg) {
+[[gnu::noinline]] struct task_result DummyModule::RunTask(const Task *,
+                                                          void *) {
   return {.block = false, .packets = 0, .bits = 0};
 }
 

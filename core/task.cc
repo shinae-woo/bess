@@ -53,17 +53,13 @@ struct task_result Task::operator()(void) const {
     return result;
   }
 
-  bess::PacketBatch *batch;
-  bess::IGate *igate;
-  Module *module;
-
   while (!subtasks_.empty()) {
-    auto next = subtasks_.front();
+    bess::IGate *igate = subtasks_.front();
     subtasks_.pop();
 
-    batch = next.second;
-    igate = next.first;
-    module = igate->module();
+    bess::PacketBatch *batch = igate->input();
+    if (!batch)
+      continue;
 
     // Process igate
     for (auto &hook : igate->hooks()) {
@@ -71,15 +67,17 @@ struct task_result Task::operator()(void) const {
     }
 
     // Process module
-    module->ProcessBatch(this, batch);
+    igate->module()->ProcessBatch(this, batch);
+    igate->ClearInput();
   }
+
+  bess::Packet::Free(&dead_batch_);
+  dead_batch_.clear();
 
   return result;
 }
 
-/*!
- * Compute constraints for the pipeline starting at this task.
- */
+// Compute constraints for the pipeline starting at this task.
 placement_constraint Task::GetSocketConstraints() const {
   if (module_) {
     std::unordered_set<const Module *> visited;
@@ -89,9 +87,7 @@ placement_constraint Task::GetSocketConstraints() const {
   }
 }
 
-/*!
- * Add a worker to the set of workers that call this task.
- */
+// Add a worker to the set of workers that call this task.
 void Task::AddActiveWorker(int wid) const {
   if (module_) {
     module_->AddActiveWorker(wid, c_->task());

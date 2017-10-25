@@ -35,6 +35,8 @@
 #include <string>
 #include <utility>
 
+#include "worker.h"
+
 namespace bess {
 
 bool GateHookFactory::RegisterGateHook(GateHook::constructor_t constructor,
@@ -106,6 +108,17 @@ void Gate::ClearHooks() {
     delete hook;
   }
   hooks_.clear();
+}
+
+void IGate::AddInput(PacketBatch *batch) {
+  if (input_ == nullptr) {
+    input_ = batch;
+  } else {
+    // FIXME check whether it exceeds bounds
+    // merge two batch
+    input_->add(batch);
+    ctx.free_batch(batch);
+  }
 }
 
 void IGate::RemoveOgate(const OGate *og) {

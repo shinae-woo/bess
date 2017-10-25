@@ -87,7 +87,7 @@ struct task_result Source::RunTask(const Task *task, void *) {
     };
   }
 
-  bess::PacketBatch *batch = new bess::PacketBatch();
+  bess::PacketBatch *batch = ctx.alloc_batch();
 
   const int pkt_overhead = 24;
   const int pkt_size = ACCESS_ONCE(pkt_size_);
@@ -95,6 +95,7 @@ struct task_result Source::RunTask(const Task *task, void *) {
 
   uint32_t cnt = bess::Packet::Alloc(batch->pkts(), burst, pkt_size);
   batch->set_cnt(cnt);
+
   RunNextModule(task, batch);  // it's fine to call this function with cnt==0
 
   return {.block = (cnt == 0),

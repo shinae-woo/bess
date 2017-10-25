@@ -34,6 +34,8 @@
 #include <queue>
 #include <string>
 
+#include "pktbatch.h"
+
 struct task_result {
   bool block;
   uint32_t packets;
@@ -56,7 +58,9 @@ class Task {
  public:
   // When this task is scheduled it will execute 'm' with 'arg'.  When the
   // associated leaf is created/destroyed, 'module_task' will be updated.
-  Task(Module *m, void *arg) : module_(m), arg_(arg), c_(nullptr) {}
+  Task(Module *m, void *arg) : module_(m), arg_(arg), c_(nullptr) {
+    dead_batch_.clear();
+  }
 
   // Called when the leaf that owns this task is destroyed.
   void Detach();
@@ -64,30 +68,30 @@ class Task {
   // Called when the leaf that owns this task is created.
   void Attach(bess::LeafTrafficClass *c);
 
+  Module *module() const { return module_; }
+
+  bess::PacketBatch *dead_batch() const { return &dead_batch_; }
+
   bess::LeafTrafficClass *GetTC() const { return c_; }
 
   struct task_result operator()(void) const;
 
-  /*!
-   * Compute constraints for the pipeline starting at this task.
-   */
+  // Compute constraints for the pipeline starting at this task.
   placement_constraint GetSocketConstraints() const;
 
-  /*!
-   * Add a worker to the set of workers that call this task.
-   */
+  // Add a worker to the set of workers that call this task.
   void AddActiveWorker(int wid) const;
 
-  Module *module() const { return module_; }
-
-  mutable std::queue<std::pair<bess::IGate *, bess::PacketBatch *>>
-      subtasks_;  // Subtasks to run
+  mutable std::queue<bess::IGate *> subtasks_;  // Subtasks to run
 
  private:
   // Used by operator().
   Module *module_;
   void *arg_;                  // Auxiliary value passed to Module::RunTask().
   bess::LeafTrafficClass *c_;  // Leaf TC associated with this task.
+
+  mutable bess::PacketBatch
+      dead_batch_;  // A packet batch for storing packets to free
 };
 
 #endif  // BESS_TASK_H_

@@ -192,11 +192,18 @@ class OGate : public Gate {
 // A class for input gate
 class IGate : public Gate {
  public:
-  IGate(Module *m, gate_idx_t idx) : Gate(m, idx), ogates_upstream_() {}
+  IGate(Module *m, gate_idx_t idx) : Gate(m, idx), ogates_upstream_() {
+    input_ = nullptr;
+  }
 
   const std::vector<OGate *> &ogates_upstream() const {
     return ogates_upstream_;
   }
+
+  void AddInput(PacketBatch *batch);
+  void ClearInput() { input_ = nullptr; }
+
+  PacketBatch *input() const { return input_; }
 
   void PushOgate(OGate *og) { ogates_upstream_.push_back(og); }
 
@@ -204,6 +211,7 @@ class IGate : public Gate {
 
  private:
   std::vector<OGate *> ogates_upstream_;  // previous ogates connected with
+  PacketBatch *input_;                    // a batch of input packets
 };
 
 }  // namespace bess

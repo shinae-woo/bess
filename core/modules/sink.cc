@@ -32,7 +32,7 @@
 
 void Sink::ProcessBatch(const Task *, bess::PacketBatch *batch) {
   bess::Packet::Free(batch);
-  delete batch;
+  ctx.free_batch(batch);
 }
 
 ADD_MODULE(Sink, "sink", "discards all packets")

@@ -193,6 +193,7 @@ class IGate : public Gate {
  public:
   IGate(Module *m, gate_idx_t idx) : Gate(m, idx), ogates_upstream_() {
     input_ = nullptr;
+    priority_ = 0;
   }
 
   const std::vector<OGate *> &ogates_upstream() const {
@@ -201,8 +202,10 @@ class IGate : public Gate {
 
   void AddInput(PacketBatch *batch);
   void ClearInput() { input_ = nullptr; }
+  void SetPriority(uint32_t priority) { priority_ = priority; }
 
   PacketBatch *input() const { return input_; }
+  uint32_t priority() const { return priority_; }
 
   void PushOgate(OGate *og);
   void RemoveOgate(const OGate *og);
@@ -210,6 +213,8 @@ class IGate : public Gate {
  private:
   std::vector<OGate *> ogates_upstream_;  // previous ogates connected with
   PacketBatch *input_;                    // a batch of input packets
+  uint32_t priority_;
+  ;
 };
 
 }  // namespace bess

@@ -48,6 +48,6 @@ for split_len in [1, 2, 4, 8, 16, 32]:
     create_pipeline(split_len)
     sys.stdout.write("Split/%2d " % split_len)
     bess.resume_all()
-    measure_tc_perf(bess, 5)
+    measure_tc_perf(bess, 1)
     bess.pause_all()
     bess.reset_all()

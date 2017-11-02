@@ -80,6 +80,6 @@ for (child_cnt, tree_depth) in [(2, 2), (2, 3), (2, 4), (2, 5),
     create_pipeline(child_cnt, tree_depth)
     sys.stdout.write("ComplexMerge/%2d/%2d " % (child_cnt, tree_depth))
     bess.resume_all()
-    measure_tc_perf(bess, 5)
+    measure_tc_perf(bess, 1)
     bess.pause_all()
     bess.reset_all()

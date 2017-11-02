@@ -46,6 +46,6 @@ def create_pipeline():
 create_pipeline()
 sys.stdout.write("MergeAsym ")
 bess.resume_all()
-measure_tc_perf(bess, 5)
+measure_tc_perf(bess, 1)
 bess.pause_all()
 bess.reset_all()

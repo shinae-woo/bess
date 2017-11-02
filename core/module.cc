@@ -394,7 +394,7 @@ void Module::RunSplit(const Task *task, const gate_idx_t *out_gates,
       hook->ProcessBatch(batches[i]);
     }
     ogate->igate()->AddInput(batches[i]);
-    task->subtasks_.push(ogate->igate());
+    task->AddToRun(ogate->igate());
   }
 }
 

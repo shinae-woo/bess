@@ -54,7 +54,7 @@ struct task_result Task::operator()(void) const {
   }
 
   while (!subtasks_.empty()) {
-    bess::IGate *igate = subtasks_.front();
+    bess::IGate *igate = subtasks_.top();
     subtasks_.pop();
 
     bess::PacketBatch *batch = igate->input();

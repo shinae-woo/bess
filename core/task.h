@@ -72,13 +72,16 @@ class Task {
   };
 
   mutable bess::utils::extended_priority_queue<bess::IGate *, IGateGreater>
-      subtasks_;  // Subtasks to run
+      subtasks_;               // Subtasks to run
+  mutable bess::IGate *next_;  // Cache next module to run without merging
+                               // Optimization for chain
 
  public:
   // When this task is scheduled it will execute 'm' with 'arg'.  When the
   // associated leaf is created/destroyed, 'module_task' will be updated.
   Task(Module *m, void *arg) : module_(m), arg_(arg), c_(nullptr) {
     dead_batch_.clear();
+    next_ = nullptr;
   }
 
   // Called when the leaf that owns this task is destroyed.
@@ -87,7 +90,7 @@ class Task {
   // Called when the leaf that owns this task is created.
   void Attach(bess::LeafTrafficClass *c);
 
-  void AddToRun(bess::IGate *ig) const { subtasks_.push(ig); }
+  void AddToRun(bess::IGate *ig) const;
 
   Module *module() const { return module_; }
 

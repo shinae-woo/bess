@@ -110,13 +110,13 @@ void Gate::ClearHooks() {
   hooks_.clear();
 }
 
-void IGate::AddInput(PacketBatch *batch) {
-  if (input_ == nullptr) {
-    input_ = batch;
+void IGate::AddPacketBatch(PacketBatch *batch) {
+  if (pkt_batch_ == nullptr) {
+    pkt_batch_ = batch;
   } else {
     // FIXME check whether it exceeds bounds
     // merge two batch
-    input_->add(batch);
+    pkt_batch_->add(batch);
     ctx.free_batch(batch);
   }
 }
@@ -129,4 +129,5 @@ void IGate::RemoveOgate(const OGate *og) {
     }
   }
 }
+
 }  // namespace bess

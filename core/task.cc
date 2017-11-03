@@ -56,7 +56,6 @@ void Task::AddToRun(bess::IGate *ig) const {
 struct task_result Task::operator()(void) const {
   // Start from the first module (task module)
   struct task_result result = module_->RunTask(this, arg_);
-
   if (result.packets == 0) {
     return result;
   }
@@ -73,10 +72,10 @@ struct task_result Task::operator()(void) const {
     next_ = nullptr;
 
     // Process packets for new igate
-    bess::PacketBatch *batch = igate->input();
+    bess::PacketBatch *batch = igate->pkt_batch();
     if (!batch)
       continue;
-    igate->ClearInput();
+    igate->ClearPacketBatch();
 
     for (auto &hook : igate->hooks()) {
       hook->ProcessBatch(batch);

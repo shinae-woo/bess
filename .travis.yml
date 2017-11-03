@@ -58,10 +58,10 @@ script:
   - travis_wait ./container_build.py bess
   - ./container_build.py kmod_buildtest
   - (cd core && ./all_test --gtest_shuffle)  # TcpFlowReconstructTest requires working directory to be `core/`
-  - coverage2 run -m unittest discover -v
-  - "[[ ${DEBUG:-0} == 0 ]] || coverage3 run -m unittest discover -v"
-  - python2 bessctl/run_module_tests.py
-  - "[[ ${DEBUG:-0} == 0 ]] || python3 bessctl/run_module_tests.py"
+    #- coverage2 run -m unittest discover -v
+    # - "[[ ${DEBUG:-0} == 0 ]] || coverage3 run -m unittest discover -v"
+    #- python2 bessctl/run_module_tests.py
+    #- "[[ ${DEBUG:-0} == 0 ]] || python3 bessctl/run_module_tests.py"
 
 after_success:
   - bessctl/bessctl daemon stop # flush out the coverage data

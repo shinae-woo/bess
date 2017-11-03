@@ -476,7 +476,7 @@ inline void Module::RunChooseModule(const Task *task, gate_idx_t ogate_idx,
     hook->ProcessBatch(batch);
   }
 
-  ogate->igate()->AddInput(batch);
+  ogate->igate()->AddPacketBatch(batch);
   task->AddToRun(ogate->igate());
 }
 

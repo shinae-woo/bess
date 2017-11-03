@@ -45,30 +45,44 @@ void Task::Attach(bess::LeafTrafficClass *c) {
   c_ = c;
 }
 
+void Task::AddToRun(bess::IGate *ig) const {
+  if (next_ == nullptr && (ig->ogates_upstream().size() == 1)) {  // chained
+    next_ = ig;
+  } else {
+    subtasks_.push(ig);
+  }
+}
+
 struct task_result Task::operator()(void) const {
-  // Inital task
+  // Start from the first module (task module)
   struct task_result result = module_->RunTask(this, arg_);
 
   if (result.packets == 0) {
     return result;
   }
 
-  while (!subtasks_.empty()) {
-    bess::IGate *igate = subtasks_.top();
-    subtasks_.pop();
+  // next_: Continuously run if modules are chainned
+  // subtasks_ : If next module connection is not chained (merged),
+  // check priority to choose which module run next
+  while (next_ || !subtasks_.empty()) {
+    bess::IGate *igate = next_;
+    if (!igate) {
+      igate = subtasks_.top();
+      subtasks_.pop();
+    }
+    next_ = nullptr;
 
+    // Process packets for new igate
     bess::PacketBatch *batch = igate->input();
     if (!batch)
       continue;
+    igate->ClearInput();
 
-    // Process igate
     for (auto &hook : igate->hooks()) {
       hook->ProcessBatch(batch);
     }
 
-    // Process module
     igate->module()->ProcessBatch(this, batch);
-    igate->ClearInput();
   }
 
   bess::Packet::Free(&dead_batch_);

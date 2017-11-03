@@ -110,9 +110,14 @@ class Worker {
 
   // FIXME: track which is used or not
   bess::PacketBatch *alloc_batch() {
-    return &pbatch_[pbatch_idx_++ % MAX_PBATCH_CNT];
+    bess::PacketBatch *batch = &pbatch_[pbatch_idx_++ % MAX_PBATCH_CNT];
+    batch->clear();
+    return batch;
   }
-  void free_batch(bess::PacketBatch *batch) { batch->clear(); }
+
+  void free_batch(bess::PacketBatch *) {
+    // Do nothing
+  }
 
   bess::Scheduler *scheduler() { return scheduler_; }
 

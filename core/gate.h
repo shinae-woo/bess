@@ -153,7 +153,7 @@ class Gate {
 
   void ClearHooks();
 
- private:
+ protected:
   Module *module_;       // the module this gate belongs to
   gate_idx_t gate_idx_;  // input/output gate index of itself
 
@@ -171,7 +171,11 @@ class OGate;
 class IGate : public Gate {
  public:
   IGate(Module *m, gate_idx_t idx)
-      : Gate(m, idx), ogates_upstream_(), pkt_batch_(), priority_() {}
+      : Gate(m, idx),
+        ogates_upstream_(),
+        pkt_batch_(),
+        priority_(),
+        mergeable_(false) {}
 
   const std::vector<OGate *> &ogates_upstream() const {
     return ogates_upstream_;
@@ -182,7 +186,9 @@ class IGate : public Gate {
   void SetPriority(uint32_t priority) { priority_ = priority; }
 
   PacketBatch *pkt_batch() const { return pkt_batch_; }
+
   uint32_t priority() const { return priority_; }
+  bool mergeable() const { return mergeable_; }
 
   void PushOgate(OGate *og);
   void RemoveOgate(const OGate *og);
@@ -191,6 +197,7 @@ class IGate : public Gate {
   std::vector<OGate *> ogates_upstream_;  // previous ogates connected with
   PacketBatch *pkt_batch_;                // a batch of input packets
   uint32_t priority_;
+  bool mergeable_;
   ;
 };
 

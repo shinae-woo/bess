@@ -110,10 +110,6 @@ void Gate::ClearHooks() {
   hooks_.clear();
 }
 
-void IGate::PushOgate(OGate *og) {
-  ogates_upstream_.push_back(og);
-}
-
 void IGate::AddPacketBatch(PacketBatch *batch) {
   if (pkt_batch_ == nullptr) {
     pkt_batch_ = batch;
@@ -125,6 +121,11 @@ void IGate::AddPacketBatch(PacketBatch *batch) {
   }
 }
 
+void IGate::PushOgate(OGate *og) {
+  ogates_upstream_.push_back(og);
+  mergeable_ = (ogates_upstream_.size() > 1);
+}
+
 void IGate::RemoveOgate(const OGate *og) {
   for (auto it = ogates_upstream_.begin(); it != ogates_upstream_.end(); ++it) {
     if (*it == og) {
@@ -132,6 +133,7 @@ void IGate::RemoveOgate(const OGate *og) {
       return;
     }
   }
+  mergeable_ = (ogates_upstream_.size() > 1);
 }
 
 void OGate::SetIgate(IGate *ig) {

@@ -75,6 +75,7 @@ class Task {
       subtasks_;               // Subtasks to run
   mutable bess::IGate *next_;  // Cache next module to run without merging
                                // Optimization for chain
+  mutable bess::PacketBatch *pkt_batch_;  // cache to run next batch
 
  public:
   // When this task is scheduled it will execute 'm' with 'arg'.  When the
@@ -91,6 +92,7 @@ class Task {
   void Attach(bess::LeafTrafficClass *c);
 
   void AddToRun(bess::IGate *ig) const;
+  void AddToRun(bess::IGate *ig, bess::PacketBatch *batch) const;
 
   Module *module() const { return module_; }
 

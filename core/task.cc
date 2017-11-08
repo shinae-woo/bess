@@ -50,9 +50,9 @@ void Task::AddToRun(bess::IGate *ig) const {
 }
 
 void Task::AddToRun(bess::IGate *ig, bess::PacketBatch *batch) const {
-  if (next_ == nullptr && !ig->mergeable()) {  // chained
-    next_ = ig;
-    pkt_batch_ = batch;
+  if (next_gate_ == nullptr && !ig->mergeable()) {  // chained
+    next_gate_ = ig;
+    next_batch_ = batch;
   } else {
     ig->AddPacketBatch(batch);
     subtasks_.push(ig);
@@ -61,6 +61,7 @@ void Task::AddToRun(bess::IGate *ig, bess::PacketBatch *batch) const {
 
 struct task_result Task::operator()(void) const {
   bess::PacketBatch init_batch;
+  ClearPacketBatch();
 
   // Start from the first module (task module)
   struct task_result result = module_->RunTask(this, &init_batch, arg_);
@@ -72,11 +73,11 @@ struct task_result Task::operator()(void) const {
     bess::IGate *igate;
     bess::PacketBatch *batch;
 
-    if (next_) {
-      igate = next_;
-      batch = pkt_batch_;
-      next_ = nullptr;
-      pkt_batch_ = nullptr;
+    if (next_gate_) {
+      igate = next_gate_;
+      batch = next_batch_;
+      next_gate_ = nullptr;
+      next_batch_ = nullptr;
     } else {
       if (subtasks_.empty())
         break;

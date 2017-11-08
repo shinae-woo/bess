@@ -47,6 +47,8 @@ struct task_result {
 typedef uint16_t task_id_t;
 typedef uint64_t placement_constraint;
 
+#define MAX_PBATCH_CNT 256
+
 class Module;
 
 namespace bess {
@@ -72,17 +74,25 @@ class Task {
   };
 
   mutable bess::utils::extended_priority_queue<bess::IGate *, IGateGreater>
-      subtasks_;               // Subtasks to run
-  mutable bess::IGate *next_;  // Cache next module to run without merging
-                               // Optimization for chain
-  mutable bess::PacketBatch *pkt_batch_;  // cache to run next batch
+      subtasks_;                    // Subtasks to run
+  mutable bess::IGate *next_gate_;  // Cache next module to run without merging
+                                    // Optimization for chain
+  mutable bess::PacketBatch
+      *next_batch_;  // cache to run next batch with next module
+
+  // Simple packet batch pool
+  mutable int pbatch_idx_;
+  mutable bess::PacketBatch *pbatch_;
 
  public:
   // When this task is scheduled it will execute 'm' with 'arg'.  When the
   // associated leaf is created/destroyed, 'module_task' will be updated.
   Task(Module *m, void *arg) : module_(m), arg_(arg), c_(nullptr) {
     dead_batch_.clear();
-    next_ = nullptr;
+    next_batch_ = nullptr;
+
+    pbatch_idx_ = 0;
+    pbatch_ = new bess::PacketBatch[MAX_PBATCH_CNT];
   }
 
   // Called when the leaf that owns this task is destroyed.
@@ -93,6 +103,16 @@ class Task {
 
   void AddToRun(bess::IGate *ig) const;
   void AddToRun(bess::IGate *ig, bess::PacketBatch *batch) const;
+
+  bess::PacketBatch *AllocPacketBatch() const {
+    // FIXME reuse freed batch if needed
+    CHECK_LT(pbatch_idx_, MAX_PBATCH_CNT);
+    bess::PacketBatch *batch = &pbatch_[pbatch_idx_++];
+    batch->clear();
+    return batch;
+  }
+
+  void ClearPacketBatch() const { pbatch_idx_ = 0; }
 
   Module *module() const { return module_; }
 

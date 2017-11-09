@@ -363,25 +363,27 @@ void Module::RunSplit(const Task *task, const gate_idx_t *out_gates,
 
   for (int i = 0; i < pkt_cnt; i++) {
     gate_idx_t ogate_idx = out_gates[i];
+
+    if (unlikely(gate_cnt <= ogate_idx) || unlikely(!ogates_[ogate_idx])) {
+      task->dead_batch()->add(*p_pkt++);
+      continue;
+    }
+
     bess::OGate *ogate = ogates_[ogate_idx];
     bess::PacketBatch *batch = ogate->pkt_batch();
     if (!batch) {
-      if (unlikely(gate_cnt <= ogate_idx) || unlikely(!ogate)) {
-        ogate->SetPacketBatch(task->dead_batch());
+      if (ogate->hooks().size()) {
+        // Having seperate batch to run ogate hooks
+        ogate->SetPacketBatch(task->AllocPacketBatch());
+        gate_with_hook[gate_with_hook_cnt++] = ogate_idx;
       } else {
-        if (ogate->hooks().size()) {
-          // Having seperate batch to run ogate hooks
-          ogate->SetPacketBatch(task->AllocPacketBatch());
-          gate_with_hook[gate_with_hook_cnt++] = ogate_idx;
-        } else {
-          // If no ogate hooks, just use next igate batch
-          if (ogate->igate()->pkt_batch() == nullptr) {
-            ogate->igate()->AddPacketBatch(task->AllocPacketBatch());
-            task->AddToRun(ogate->igate());
-          }
-          ogate->SetPacketBatch(ogate->igate()->pkt_batch());
-          gate_without_hook[gate_without_hook_cnt++] = ogate_idx;
+        // If no ogate hooks, just use next igate batch
+        if (ogate->igate()->pkt_batch() == nullptr) {
+          ogate->igate()->AddPacketBatch(task->AllocPacketBatch());
+          task->AddToRun(ogate->igate());
         }
+        ogate->SetPacketBatch(ogate->igate()->pkt_batch());
+        gate_without_hook[gate_without_hook_cnt++] = ogate_idx;
       }
       batch = ogate->pkt_batch();
     }

@@ -46,7 +46,7 @@ void Task::Attach(bess::LeafTrafficClass *c) {
 }
 
 void Task::AddToRun(bess::IGate *ig) const {
-  subtasks_.push(ig);
+  igates_to_run_.push(ig);
 }
 
 void Task::AddToRun(bess::IGate *ig, bess::PacketBatch *batch) const {
@@ -55,7 +55,7 @@ void Task::AddToRun(bess::IGate *ig, bess::PacketBatch *batch) const {
     next_batch_ = batch;
   } else {
     ig->AddPacketBatch(batch);
-    subtasks_.push(ig);
+    igates_to_run_.push(ig);
   }
 }
 
@@ -67,7 +67,7 @@ struct task_result Task::operator()(void) const {
   struct task_result result = module_->RunTask(this, &init_batch, arg_);
 
   // next_: Continuously run if modules are chainned
-  // subtasks_ : If next module connection is not chained (merged),
+  // igates_to_run_ : If next module connection is not chained (merged),
   // check priority to choose which module run next
   while (1) {
     bess::IGate *igate;
@@ -79,18 +79,18 @@ struct task_result Task::operator()(void) const {
       next_gate_ = nullptr;
       next_batch_ = nullptr;
     } else {
-      if (subtasks_.empty())
+      if (igates_to_run_.empty())
         break;
 
-      igate = subtasks_.top();
-      subtasks_.pop();
+      igate = igates_to_run_.top();
+      igates_to_run_.pop();
 
       batch = igate->pkt_batch();
-      igate->ClearPacketBatch();
-    }
 
-    if (batch == nullptr) {
-      continue;
+      if (batch == nullptr)
+        continue;
+
+      igate->ClearPacketBatch();
     }
 
     for (auto &hook : igate->hooks()) {

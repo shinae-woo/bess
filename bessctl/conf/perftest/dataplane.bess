@@ -1,0 +1,111 @@
+# Copyright (c) 2017, The Regents of the University of California.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# * Redistributions of source code must retain the above copyright notice, this
+# list of conditions and the following disclaimer.
+#
+# * Redistributions in binary form must reproduce the above copyright notice,
+# this list of conditions and the following disclaimer in the documentation
+# and/or other materials provided with the distribution.
+#
+# * Neither the names of the copyright holders nor the names of their
+# contributors may be used to endorse or promote products derived from this
+# software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+import sys
+import time
+from test_utils import *
+
+psize = int($BESS_PKT_SIZE!'60')
+print('Using packet size %d (envvar "BESS_PKT_SIZE")' % psize)
+
+CORES_CNT = 2
+OUT_Q = 4
+
+c_batch = int($C_BATCH!'100')
+c_packet = int($C_PACKET!'50')
+c_byte = int($C_BYTE!'0')
+
+cycle_conf = {'cycles_per_batch': c_batch,
+              'cycles_per_packet': c_packet,
+              'cycles_per_byte': c_byte}
+
+def create_pipeline():
+    Source(pkt_size=psize) -> \
+            net_match::RandomSplit(gates=range(2)) # encap check
+
+    # internal traffic
+    net_match:0 \
+            -> Bypass(**cycle_conf) \
+            -> Bypass(**cycle_conf) \
+            -> Bypass(**cycle_conf) \
+            -> core_match::RandomSplit(gates=range(CORES_CNT + 2)) # core distributes
+
+    # external traffic
+    net_match:1 \
+            -> Bypass(**cycle_conf) \
+            -> Bypass(**cycle_conf) \
+            -> Bypass(**cycle_conf) \
+            -> Bypass(**cycle_conf) \
+            -> lb::RandomSplit(gates=range(CORES_CNT)) # load balancing
+
+    E2Out::RandomSplit(gates=range(2))
+    no_burned::Bypass(**cycle_conf) -> E2Out
+    burned::Bypass(**cycle_conf) -> E2Out
+
+    # Fake NFs burning cycles, connected from ex, lb
+    burn = [Bypass(name="NF%i"%i, cycles_per_packet=2590) for i in range(CORES_CNT)]
+    for i in range(CORES_CNT):
+        core_match:i -> Bypass(**cycle_conf) -> burn[i]
+        lb:(i+2) -> Bypass(**cycle_conf) -> burn[i] ## Should be queue?
+        burn[i] -> burned
+
+    # NO NFs
+    lb:0 \
+            -> Bypass(**cycle_conf) \
+            -> Bypass(**cycle_conf) \
+            -> Bypass(**cycle_conf) \
+            -> Bypass(**cycle_conf) \
+            -> no_burned
+    lb:1 \
+            -> Bypass(**cycle_conf) \
+            -> Bypass(**cycle_conf) \
+            -> Bypass(**cycle_conf) \
+            -> Bypass(**cycle_conf) \
+            -> no_burned
+
+    # Going out
+    hashlb::RandomSplit(gates=range(OUT_Q))
+    E2Out:0 \
+            -> Bypass(**cycle_conf) \
+            -> Bypass(**cycle_conf) \
+            -> Bypass(**cycle_conf) \
+            -> Bypass(**cycle_conf) \
+            -> hashlb
+    E2Out:1 -> hashlb
+
+    for i in range(OUT_Q):
+        hashlb:i -> Sink()
+
+create_pipeline()
+sys.stdout.write("Dataplain ")
+bess.track_module('', False)
+bess.resume_all()
+measure_tc_perf(bess, 3)
+bess.pause_all()
+bess.reset_all()

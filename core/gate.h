@@ -181,6 +181,7 @@ class IGate : public Gate {
     return ogates_upstream_;
   }
 
+  void SetPacketBatch(PacketBatch *batch);
   void AddPacketBatch(PacketBatch *batch);
   void ClearPacketBatch() { pkt_batch_ = nullptr; }
   void SetPriority(uint32_t priority) { priority_ = priority; }
@@ -216,12 +217,14 @@ class OGate : public Gate {
   IGate *igate() const { return igate_; }
   gate_idx_t igate_idx() const { return igate_idx_; }
   PacketBatch *pkt_batch() const { return pkt_batch_; }
+  PacketBatch *batch() { return &batch_; }
 
  private:
   Module *next_;            // next module connected with
   IGate *igate_;            // next igate connected with
   gate_idx_t igate_idx_;    // cache for igate->gate_idx
   PacketBatch *pkt_batch_;  // a batch of input packets
+  PacketBatch batch_;       // a batch of input packets
 
   DISALLOW_COPY_AND_ASSIGN(OGate);
 };

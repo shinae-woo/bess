@@ -41,8 +41,8 @@
 #define __ymm_aligned __attribute__((aligned(32)))
 #define __zmm_aligned __attribute__((aligned(64)))
 
-#if !__SSSE3__
-#error CPU must be at least Core 2 or equivalent (SSSE3 required)
+#if !__SSE4_2__
+#error CPU must be at least corei5 or equivalent (SSE4.2 required)
 #endif
 
 std::string m128i_to_str(__m128i a);
@@ -57,26 +57,16 @@ static inline __m128i gather_m128i(void *a, void *b) {
 #endif
 }
 
-#if __AVX__
+__attribute__((target("avx"))) std::string m256i_to_str(__m256i a);
 
-std::string m256i_to_str(__m256i a);
-
-static inline __m256d concat_two_m128d(__m128d lo, __m128d hi) {
-#if 1
-  /* faster */
+__attribute__((target("avx"))) static inline __m256d concat_two_m128d(
+    __m128d lo, __m128d hi) {
   return _mm256_insertf128_pd(_mm256_castpd128_pd256(lo), hi, 1);
-#else
-  return _mm256_permute2f128_si256(_mm256_castsi128_si256(lo),
-                                   _mm256_castsi128_si256(hi), (2 << 4) | 0);
-#endif
 }
 
-static inline __m256i concat_two_m128i(__m128i lo, __m128i hi) {
-#if __AVX2__
-  return _mm256_inserti128_si256(_mm256_castsi128_si256(lo), hi, 1);
-#else
+__attribute__((target("avx"))) static inline __m256i concat_two_m128i(
+    __m128i lo, __m128i hi) {
   return _mm256_insertf128_si256(_mm256_castsi128_si256(lo), hi, 1);
-#endif
 }
 
 static inline uint64_t m128i_extract_u64(__m128i a, int i) {
@@ -100,7 +90,5 @@ static inline uint64_t m128i_extract_u64(__m128i a, int i) {
   return b[i];
 #endif
 }
-
-#endif  // __AVX__
 
 #endif  // BESS_UTILS_SIMD_H_

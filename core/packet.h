@@ -255,7 +255,13 @@ class alignas(64) Packet {
   static Packet *Alloc() { return __packet_alloc(); }
 
   // cnt must be [0, PacketBatch::kMaxBurst]
-  static inline size_t Alloc(Packet **pkts, size_t cnt, uint16_t len);
+  __attribute__((target("default"))) static inline size_t Alloc(Packet **pkts,
+                                                                size_t cnt,
+                                                                uint16_t len);
+
+  __attribute__((target("avx"))) static inline size_t Alloc(Packet **pkts,
+                                                            size_t cnt,
+                                                            uint16_t len);
 
   // pkt may be nullptr
   static void Free(Packet *pkt) {
@@ -264,7 +270,11 @@ class alignas(64) Packet {
 
   // All pointers in pkts must not be nullptr.
   // cnt must be [0, PacketBatch::kMaxBurst]
-  static inline void Free(Packet **pkts, size_t cnt);
+  __attribute__((target("default"))) static inline void Free(Packet **pkts,
+                                                             size_t cnt);
+
+  __attribute__((target("avx"))) static inline void Free(Packet **pkts,
+                                                         size_t cnt);
 
   // batch must not be nullptr
   static void Free(PacketBatch *batch) { Free(batch->pkts(), batch->cnt()); }
@@ -389,10 +399,11 @@ class alignas(64) Packet {
 static_assert(std::is_standard_layout<Packet>::value, "Incorrect class Packet");
 static_assert(sizeof(Packet) == SNBUF_SIZE, "Incorrect class Packet");
 
-#if __AVX__
 #include "packet_avx.h"
-#else
-inline size_t Packet::Alloc(Packet **pkts, size_t cnt, uint16_t len) {
+
+__attribute__((target("default"))) inline size_t Packet::Alloc(Packet **pkts,
+                                                               size_t cnt,
+                                                               uint16_t len) {
   DCHECK_LE(cnt, PacketBatch::kMaxBurst);
 
   // rte_mempool_get_bulk() is all (cnt) or nothing (0)
@@ -412,7 +423,8 @@ inline size_t Packet::Alloc(Packet **pkts, size_t cnt, uint16_t len) {
   return cnt;
 }
 
-inline void Packet::Free(Packet **pkts, size_t cnt) {
+__attribute__((target("default"))) inline void Packet::Free(Packet **pkts,
+                                                            size_t cnt) {
   DCHECK_LE(cnt, PacketBatch::kMaxBurst);
 
   // rte_mempool_put_bulk() crashes when called with cnt == 0
@@ -442,7 +454,6 @@ slow_path:
     Free(pkts[i]);
   }
 }
-#endif
 
 }  // namespace bess
 

@@ -37,7 +37,8 @@
 
 #include "utils/simd.h"
 
-static inline int snb_alloc_bulk(snb_array_t snbs, int cnt, uint16_t len) {
+__attribute__((target("avx"))) static inline int snb_alloc_bulk(
+    snb_array_t snbs, int cnt, uint16_t len) {
   int ret;
   int i;
 
@@ -97,7 +98,8 @@ static inline int snb_alloc_bulk(snb_array_t snbs, int cnt, uint16_t len) {
  * 4. the data buffer is embedded in the mbuf
  *    (Do not use RTE_MBUF_(IN)DIRECT, since there is a difference
  *     between DPDK 1.8 and 2.0) */
-static inline void snb_free_bulk(snb_array_t snbs, int cnt) {
+__attribute__((target("avx"))) static inline void snb_free_bulk(
+    snb_array_t snbs, int cnt) {
   struct rte_mempool *_pool = snbs[0]->mbuf.pool;
 
   /* broadcast */

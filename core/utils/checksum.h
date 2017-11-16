@@ -49,13 +49,14 @@ namespace utils {
 // Todo: strongly-typed endian for input/output paramters
 
 // Returns 32-bit one's complement sum of 'len' bytes from 'buf' and 'sum16'.
-static inline uint32_t CalculateSum(const void *buf, size_t len) {
-  const uint64_t *buf64 = reinterpret_cast<const uint64_t *>(buf);
-  uint64_t sum64 = 0;
-  bool odd = len & 1;
+__attribute__((target("default"))) static inline uint64_t
+CalculateSumOptimization(const uint64_t *&, size_t &, uint64_t &) {
+  return 0;
+}
 
-#if __AVX2__
-  // Faster for >128B data
+__attribute__((target("avx2"))) static inline uint64_t CalculateSumOptimization(
+    const uint64_t *&buf64, size_t &len, uint64_t &sum64) {
+  // Optimization for AVX2: Faster for >128B data
   if (len >= sizeof(__m256i) * 4) {
     const __m256i *buf256 = reinterpret_cast<const __m256i *>(buf64);
     __m256i zero256 = _mm256_setzero_si256();
@@ -103,7 +104,16 @@ static inline uint32_t CalculateSum(const void *buf, size_t len) {
     sum64 += m128i_extract_u64(sum128, 0) + m128i_extract_u64(sum128, 1);
     buf64 = reinterpret_cast<const uint64_t *>(buf256);
   }
-#endif
+
+  return sum64;
+}
+
+static inline uint32_t CalculateSum(const void *buf, size_t len) {
+  const uint64_t *buf64 = reinterpret_cast<const uint64_t *>(buf);
+  uint64_t sum64 = 0;
+  bool odd = len & 1;
+
+  CalculateSumOptimization(buf64, len, sum64);
 
 #if __x86_64
   // Repeat 64-bit one's complement sum (at sum64) including carrys

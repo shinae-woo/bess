@@ -46,17 +46,18 @@ static inline void Copy16(void *__restrict__ dst,
                    _mm_loadu_si128(reinterpret_cast<const __m128i *>(src)));
 }
 
-static inline void Copy32(void *__restrict__ dst,
-                          const void *__restrict__ src) {
-#if __AVX2__
-  _mm256_storeu_si256(
-      reinterpret_cast<__m256i *>(dst),
-      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(src)));
-#else
+__attribute__((target("default"))) static inline void Copy32(
+    void *__restrict__ dst, const void *__restrict__ src) {
   Copy16(dst, src);
   Copy16(reinterpret_cast<__m128i *>(dst) + 1,
          reinterpret_cast<const __m128i *>(src) + 1);
-#endif
+}
+
+__attribute__((target("avx"))) static inline void Copy32(
+    void *__restrict__ dst, const void *__restrict__ src) {
+  _mm256_storeu_si256(
+      reinterpret_cast<__m256i *>(dst),
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(src)));
 }
 
 // Copy exactly "bytes" (<= 64). Works best if size is a compile-time constant.
@@ -139,20 +140,97 @@ static inline void CopySmall(void *__restrict__ dst,
 // Inline version of Copy(). Use only when performance is critial. Since the
 // function is inlined whenever used, the compiled code will be substantially
 // larger. See Copy() for more details.
-static inline void CopyInlined(void *__restrict__ dst,
-                               const void *__restrict__ src, size_t bytes,
-                               bool sloppy = false) {
-#if __AVX2__
-  using block_t = __m256i;
-  auto copy_block = [](void *__restrict__ d, const void *__restrict__ s) {
-    Copy32(d, s);
-  };
-#else
+__attribute__((target("default"))) static inline void CopyInlined(
+    void *__restrict__ dst, const void *__restrict__ src, size_t bytes,
+    bool sloppy = false) {
   using block_t = __m128i;
   auto copy_block = [](void *__restrict__ d, const void *__restrict__ s) {
     Copy16(d, s);
   };
-#endif
+
+  const size_t block_size = sizeof(block_t);
+  uintptr_t dst_u = reinterpret_cast<uintptr_t>(dst);
+  uintptr_t src_u = reinterpret_cast<uintptr_t>(src);
+
+  if (bytes <= 64 && !sloppy) {
+    CopySmall(dst, src, bytes);
+    return;
+  }
+
+  // Align dst on a cache line if buffer is big yet misaligned.
+  if (bytes >= 256 && (dst_u % block_size) != 0) {
+    // Copy "block_t" bytes, but proceed with only "offset" bytes.
+    copy_block(reinterpret_cast<block_t *__restrict__>(dst),
+               reinterpret_cast<const block_t *__restrict__>(src));
+
+    uintptr_t offset = block_size - (dst_u % block_size);
+    dst = reinterpret_cast<decltype(dst)>(dst_u + offset);
+    src = reinterpret_cast<decltype(src)>(src_u + offset);
+    bytes -= offset;
+  }
+
+  auto *d = reinterpret_cast<block_t *__restrict__>(dst);
+  auto *s = reinterpret_cast<const block_t *__restrict__>(src);
+
+  size_t num_blocks = (sloppy ? bytes + block_size - 1 : bytes) / block_size;
+  size_t num_loops = num_blocks / 8;
+
+  while (num_loops--) {
+    copy_block(d + 0, s + 0);
+    copy_block(d + 1, s + 1);
+    copy_block(d + 2, s + 2);
+    copy_block(d + 3, s + 3);
+    copy_block(d + 4, s + 4);
+    copy_block(d + 5, s + 5);
+    copy_block(d + 6, s + 6);
+    copy_block(d + 7, s + 7);
+    d += 8;
+    s += 8;
+  }
+
+  // Copy the leftover. No block to copy if remainder is 0
+  size_t leftover_blocks = num_blocks % 8;
+
+  switch (leftover_blocks) {
+    case 7:
+      copy_block(d + 6, s + 6);
+      FALLTHROUGH;
+    case 6:
+      copy_block(d + 5, s + 5);
+      FALLTHROUGH;
+    case 5:
+      copy_block(d + 4, s + 4);
+      FALLTHROUGH;
+    case 4:
+      copy_block(d + 3, s + 3);
+      FALLTHROUGH;
+    case 3:
+      copy_block(d + 2, s + 2);
+      FALLTHROUGH;
+    case 2:
+      copy_block(d + 1, s + 1);
+      FALLTHROUGH;
+    case 1:
+      copy_block(d + 0, s + 0);
+  }
+
+  if (!sloppy && (bytes % block_size) != 0) {
+    size_t fringe = bytes % block_size;
+    dst_u = reinterpret_cast<uintptr_t>(d + leftover_blocks);
+    src_u = reinterpret_cast<uintptr_t>(s + leftover_blocks);
+
+    copy_block(reinterpret_cast<decltype(d)>(dst_u + fringe - block_size),
+               reinterpret_cast<decltype(s)>(src_u + fringe - block_size));
+  }
+}
+
+__attribute__((target("avx"))) static inline void CopyInlined(
+    void *__restrict__ dst, const void *__restrict__ src, size_t bytes,
+    bool sloppy = false) {
+  using block_t = __m256i;
+  auto copy_block = [](void *__restrict__ d, const void *__restrict__ s) {
+    Copy32(d, s);
+  };
 
   const size_t block_size = sizeof(block_t);
   uintptr_t dst_u = reinterpret_cast<uintptr_t>(dst);

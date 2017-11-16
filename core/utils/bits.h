@@ -145,7 +145,6 @@ static inline void MaskBytes(uint8_t *buf, uint8_t const *mask,
     return MaskBytes64(buf, mask, len);
   }
 
-  // AVX2?
   size_t n = len / sizeof(__m128i);
   size_t leftover = len - n * sizeof(__m128i);
   __m128i *buf128 = reinterpret_cast<__m128i *>(buf);

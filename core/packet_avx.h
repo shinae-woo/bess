@@ -39,7 +39,9 @@
 
 #include "utils/simd.h"
 
-inline size_t Packet::Alloc(Packet **pkts, size_t cnt, uint16_t len) {
+__attribute__((target("avx"))) inline size_t Packet::Alloc(Packet **pkts,
+                                                           size_t cnt,
+                                                           uint16_t len) {
   // rte_mempool_get_bulk() is all (cnt) or nothing (0)
   if (rte_mempool_get_bulk(ctx.pframe_pool(), reinterpret_cast<void **>(pkts),
                            cnt) < 0) {
@@ -117,7 +119,8 @@ inline size_t Packet::Alloc(Packet **pkts, size_t cnt, uint16_t len) {
  * 4. the data buffer is embedded in the mbuf
  *    (Do not use RTE_MBUF_(IN)DIRECT, since there is a difference
  *     between DPDK 1.8 and 2.0) */
-inline void Packet::Free(Packet **pkts, size_t cnt) {
+__attribute__((target("avx"))) inline void Packet::Free(Packet **pkts,
+                                                        size_t cnt) {
   DCHECK(cnt <= PacketBatch::kMaxBurst);
 
   // rte_mempool_put_bulk() crashes when called with cnt == 0

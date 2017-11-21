@@ -176,7 +176,7 @@ void IPLookup::DeInit() {
   }
 }
 
-void IPLookup::ProcessBatch(bess::PacketBatch *batch) {
+void IPLookup::ProcessBatch(const Task *task, bess::PacketBatch *batch) {
   using bess::utils::Ethernet;
   using bess::utils::Ipv4;
 
@@ -221,7 +221,8 @@ void IPLookup::ProcessBatch(bess::PacketBatch *batch) {
     ip_addr = _mm_shuffle_epi8(ip_addr, bswap_mask);
 
 #ifndef __OPTIMIZE__
-    lpm_lookupx4(lpm_, ip_addr, reinterpret_cast<uint64_t *>(next_hops), default_gate);
+    lpm_lookupx4(lpm_, ip_addr, reinterpret_cast<uint64_t *>(next_hops),
+                 default_gate);
 #else
     rte_lpm_lookupx4(lpm_, ip_addr, next_hops, default_gate);
 #endif
@@ -253,7 +254,7 @@ void IPLookup::ProcessBatch(bess::PacketBatch *batch) {
     }
   }
 
-  RunSplit(out_gates, batch);
+  RunSplit(task, out_gates, batch);
 }
 
 CommandResponse IPLookup::CommandAdd(

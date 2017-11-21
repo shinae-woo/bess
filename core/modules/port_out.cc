@@ -85,7 +85,7 @@ std::string PortOut::GetDesc() const {
                              port_->port_builder()->class_name().c_str());
 }
 
-void PortOut::ProcessBatch(bess::PacketBatch *batch) {
+void PortOut::ProcessBatch(const Task *, bess::PacketBatch *batch) {
   Port *p = port_;
 
   if (unlikely(worker_queues_[ctx.wid()] < 0)) {
@@ -141,7 +141,7 @@ int PortOut::OnEvent(bess::Event e) {
   // Assign remaining queues to any newly attached workers.
   for (size_t i = 0; i < Worker::kMaxWorkers; i++) {
     if (actives[i] && worker_queues_[i] < 0) {
-      CHECK(!available_queues_.empty()); // Should not be tripped.
+      CHECK(!available_queues_.empty());  // Should not be tripped.
       worker_queues_[i] = available_queues_.back();
       available_queues_.pop_back();
     }

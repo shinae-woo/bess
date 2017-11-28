@@ -449,7 +449,7 @@ class alignas(64) Module {
 static inline void deadend(bess::PacketBatch *batch) {
   ctx.incr_silent_drops(batch->cnt());
   bess::Packet::Free(batch);
-  // ctx.free_batch(batch);
+  batch->clear();
 }
 
 inline void Module::RunChooseModule(const Task *task, gate_idx_t ogate_idx,
@@ -457,7 +457,6 @@ inline void Module::RunChooseModule(const Task *task, gate_idx_t ogate_idx,
   bess::OGate *ogate;
 
   if (unlikely(batch->cnt() <= 0)) {
-    // ctx.free_batch(batch);
     return;
   }
 

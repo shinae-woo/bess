@@ -381,5 +381,14 @@ TEST_F(ModuleTester, SetIGatePriority) {
   EXPECT_EQ(5, m6->igates()[0]->priority());
   EXPECT_EQ(2, m7->igates()[0]->priority());
   EXPECT_EQ(2, m8->igates()[0]->priority());
+
+  EXPECT_EQ(0 + 1, m1->igates()[0]->global_gate_index() +
+                       m2->igates()[0]->global_gate_index());
+  EXPECT_EQ(2 + 3 + 4, m3->igates()[0]->global_gate_index() +
+                           m7->igates()[0]->global_gate_index() +
+                           m8->igates()[0]->global_gate_index());
+  EXPECT_EQ(5, m4->igates()[0]->global_gate_index());
+  EXPECT_EQ(6, m5->igates()[0]->global_gate_index());
+  EXPECT_EQ(7, m6->igates()[0]->global_gate_index());
 }
 }  // namespace

@@ -50,6 +50,7 @@ typedef uint64_t placement_constraint;
 #define MAX_PBATCH_CNT 256
 
 class Module;
+struct Context;
 
 namespace bess {
 class LeafTrafficClass;
@@ -91,10 +92,6 @@ class Task {
 
   mutable std::vector<bess::PacketBatch *> gate_batch_;
 
-  /* The current input gate index is not given as a function parameter.
-   * Modules should use get_igate() for access */
-  mutable gate_idx_t current_igate_;
-
  public:
   // When this task is scheduled it will execute 'm' with 'arg'.  When the
   // associated leaf is created/destroyed, 'module_task' will be updated.
@@ -108,8 +105,7 @@ class Task {
         pbatch_idx_(),
         pbatch_(
             new bess::PacketBatch[MAX_PBATCH_CNT]),  // XXX Need to adjust size
-        gate_batch_(std::vector<bess::PacketBatch *>(64, 0)),
-        current_igate_() {
+        gate_batch_(std::vector<bess::PacketBatch *>(64, 0)) {
     dead_batch_.clear();
   }
 
@@ -158,9 +154,6 @@ class Task {
 
   Module *module() const { return module_; }
 
-  gate_idx_t get_igate() const { return current_igate_; }
-  void set_current_igate(gate_idx_t idx) const { current_igate_ = idx; }
-
   bess::PacketBatch *dead_batch() const { return &dead_batch_; }
 
   bess::PacketBatch *get_gate_batch(bess::Gate *gate) const {
@@ -173,7 +166,7 @@ class Task {
 
   bess::LeafTrafficClass *GetTC() const { return c_; }
 
-  struct task_result operator()(void) const;
+  struct task_result operator()(Context *ctx);
 
   // Compute constraints for the pipeline starting at this task.
   placement_constraint GetSocketConstraints() const;

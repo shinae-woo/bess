@@ -48,7 +48,7 @@ MPLSPop::MPLSPop()
   max_allowed_workers_ = Worker::kMaxWorkers;
 }
 
-void MPLSPop::ProcessBatch(const Task *task, bess::PacketBatch *batch) {
+void MPLSPop::ProcessBatch(Context *ctx, bess::PacketBatch *batch) {
   int cnt = batch->cnt();
 
   for (int i = 0; i < cnt; i++) {
@@ -58,10 +58,10 @@ void MPLSPop::ProcessBatch(const Task *task, bess::PacketBatch *batch) {
 
     if (eth->ether_type != be16_t(Ethernet::Type::kMpls)) {
       // non MPLS packets are sent to different output gate
-      EmitPacket(task, pkt, 1);
+      EmitPacket(ctx, pkt, 1);
       continue;
     }
-    EmitPacket(task, pkt, 0);
+    EmitPacket(ctx, pkt, 0);
 
     // TODO(gsagie) save the MPLS label as metadata
     // Mpls *mpls = reinterpret_cast<Mpls *>(eth_header + 1);

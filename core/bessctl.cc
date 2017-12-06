@@ -370,7 +370,7 @@ static ::Port* create_port(const std::string& name, const PortBuilder& driver,
   p->queue_size[PACKET_DIR_OUT] = size_out_q;
 
   // DPDK functions may be called, so be prepared
-  ctx.SetNonWorker();
+  current_worker.SetNonWorker();
 
   CommandResponse ret = p->InitWithGenericArg(arg);
 
@@ -1115,7 +1115,7 @@ class BESSControlImpl final : public BESSControl::Service {
     }
 
     // DPDK functions may be called, so be prepared
-    ctx.SetNonWorker();
+    current_worker.SetNonWorker();
 
     pb_error_t* error = response->mutable_error();
     Module* module =
@@ -1501,7 +1501,7 @@ class BESSControlImpl final : public BESSControl::Service {
     }
 
     // DPDK functions may be called, so be prepared
-    ctx.SetNonWorker();
+    current_worker.SetNonWorker();
 
     Module* m = it->second;
     *response = m->RunCommand(request->cmd(), request->arg());

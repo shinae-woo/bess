@@ -166,7 +166,7 @@ class Task {
 
   bess::LeafTrafficClass *GetTC() const { return c_; }
 
-  struct task_result operator()(Context *ctx);
+  struct task_result operator()(Context *ctx) const;
 
   // Compute constraints for the pipeline starting at this task.
   placement_constraint GetSocketConstraints() const;

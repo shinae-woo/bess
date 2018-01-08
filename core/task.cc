@@ -45,7 +45,7 @@ void Task::Attach(bess::LeafTrafficClass *c) {
   c_ = c;
 }
 
-struct task_result Task::operator()(Context *ctx) {
+struct task_result Task::operator()(Context *ctx) const {
   bess::PacketBatch init_batch;
   ClearPacketBatch();
 

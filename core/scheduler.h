@@ -235,8 +235,6 @@ class DefaultScheduler : public Scheduler {
 
     Context ctx = {};
     ctx.wid = current_worker.wid();
-    ctx.current_tsc = this->checkpoint_;  // Tasks see updated tsc.
-    ctx.current_ns = this->checkpoint_ * this->ns_per_cycle_;
 
     // The main scheduling, running, accounting loop.
     for (uint64_t round = 0;; ++round) {
@@ -262,8 +260,11 @@ class DefaultScheduler : public Scheduler {
 
     uint64_t now;
     if (leaf) {
+      ctx->current_tsc = this->checkpoint_;  // Tasks see updated tsc.
+      ctx->current_ns = this->checkpoint_ * this->ns_per_cycle_;
       current_worker.set_current_tsc(ctx->current_tsc);
       current_worker.set_current_ns(ctx->current_ns);
+
       ctx->task = leaf->task();
 
       // Run.
@@ -320,8 +321,6 @@ class ExperimentalScheduler : public Scheduler {
 
     Context ctx = {};
     ctx.wid = current_worker.wid();
-    ctx.current_tsc = this->checkpoint_;  // Tasks see updated tsc.
-    ctx.current_ns = this->checkpoint_ * this->ns_per_cycle_;
 
     // The main scheduling, running, accounting loop.
     for (uint64_t round = 0;; ++round) {
@@ -347,6 +346,11 @@ class ExperimentalScheduler : public Scheduler {
 
     uint64_t now;
     if (leaf) {
+      ctx->current_tsc = this->checkpoint_;  // Tasks see updated tsc.
+      ctx->current_ns = this->checkpoint_ * this->ns_per_cycle_;
+      current_worker.set_current_tsc(ctx->current_tsc);
+      current_worker.set_current_ns(ctx->current_ns);
+
       ctx->task = leaf->task();
 
       // Run.
